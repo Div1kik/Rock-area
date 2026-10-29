@@ -312,7 +312,27 @@
             cropped.delete(); cropGray.delete(); mask.delete();
         }
 
-        initCamera();
+        async function initCamera() {
+    // Список конфигураций: сначала пробуем Full HD, если сбоит — берём базовый поток
+    const configs = [
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false }
+    ];
+
+    for (let config of configs) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia(config);
+            video.srcObject = stream;
+            return; // Успешно подключились — выходим
+        } catch (err) {
+            console.warn("Попытка с конфигурацией не удалась, пробуем следующую...", err);
+        }
+    }
+
+    alert('Не удалось запустить камеру. Проверьте, закрыто ли стандартное приложение «Камера» и выключен ли фонарик.');
+}
+;
     </script>
 </body>
 </html>
