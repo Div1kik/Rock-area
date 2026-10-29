@@ -8,7 +8,7 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
         body { background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 12px; }
-        h1 { font-size: 1.1rem; margin-bottom: 6px; font-weight: 500; }
+        h1 { font-size: 1.1rem; margin-bottom: 8px; font-weight: 500; }
 
         .view-container {
             position: relative;
@@ -37,22 +37,19 @@
             z-index: 10;
         }
 
-        /* Виджет гироскопа (уровня) */
         .gyro-widget {
             position: absolute;
             top: 10px;
             right: 10px;
-            width: 54px;
-            height: 54px;
+            width: 50px;
+            height: 50px;
             border-radius: 50%;
             background: rgba(20, 20, 20, 0.75);
-            border: 1.5px solid rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(4px);
+            border: 1.5px solid rgba(255, 255, 255, 0.3);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 10;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
         }
 
         .gyro-target {
@@ -60,8 +57,7 @@
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            border: 1px dashed rgba(255, 255, 255, 0.4);
-            pointer-events: none;
+            border: 1px dashed rgba(255, 255, 255, 0.5);
         }
 
         .gyro-bubble {
@@ -70,7 +66,7 @@
             height: 10px;
             border-radius: 50%;
             background: #ff9500;
-            box-shadow: 0 0 6px #ff9500;
+            box-shadow: 0 0 5px #ff9500;
             transition: transform 0.05s linear;
         }
 
@@ -128,6 +124,7 @@
             text-align: center;
             border: 1px solid #333;
         }
+
         .result-val {
             font-size: 1.8rem;
             color: #4cd964;
@@ -138,4 +135,289 @@
 </head>
 <body>
 
-    <h1>Авто-захват площади скола
+    <h1>Авто-захват площади скола</h1>
+
+    <div class="view-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output-canvas" style="display: none;"></canvas>
+        <div class="status-badge" id="status-badge">Загрузка CV модуля...</div>
+
+        <div class="gyro-widget">
+            <div class="gyro-target" id="gyro-target"></div>
+            <div class="gyro-bubble" id="gyro-bubble"></div>
+            <span class="gyro-label" id="gyro-label">0°</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="capture-btn" disabled>Измерить (Авто-захват)</button>
+        
+        <div class="slider-group">
+            <div class="slider-row">
+                <span>Порог отсечения фона:</span>
+                <span id="thresh-val">Авто</span>
+            </div>
+            <input type="range" id="thresh-slider" min="30" max="220" value="110">
+        </div>
+    </div>
+
+    <div class="result-card">
+        <div>Определенная площадь разрыва:</div>
+        <div class="result-val" id="area-display">0.00 см²</div>
+        <div style="font-size: 12px; color: #aaa;" id="info-display">Наведите камеру на квадратную рамку</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const outputCanvas = document.getElementById('output-canvas');
+        const captureBtn = document.getElementById('capture-btn');
+        const statusBadge = document.getElementById('status-badge');
+        const threshSlider = document.getElementById('thresh-slider');
+        const threshVal = document.getElementById('thresh-val');
+        const areaDisplay = document.getElementById('area-display');
+        const infoDisplay = document.getElementById('info-display');
+
+        const gyroBubble = document.getElementById('gyro-bubble');
+        const gyroTarget = document.getElementById('gyro-target');
+        const gyroLabel = document.getElementById('gyro-label');
+
+        const REAL_FRAME_SIDE_MM = 100.0;
+        const REAL_AREA_CM2 = (REAL_FRAME_SIDE_MM * REAL_FRAME_SIDE_MM) / 100.0;
+        const WARP_SIZE = 500;
+
+        let cvReady = false;
+        let isCaptured = false;
+        let lastRawMat = null;
+
+        function onOpenCvReady() {
+            cvReady = true;
+            statusBadge.textContent = 'Готов к замеру';
+            statusBadge.style.color = '#4cd964';
+            captureBtn.disabled = false;
+        }
+
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', (e) => {
+                if (e.beta === null || e.gamma === null) return;
+                let pitch = e.beta;
+                let roll = e.gamma;
+                let x = Math.max(-16, Math.min(16, roll * 0.7));
+                let y = Math.max(-16, Math.min(16, pitch * 0.7));
+
+                gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
+                const totalTilt = Math.sqrt(pitch * pitch + roll * roll);
+                gyroLabel.textContent = `${Math.round(totalTilt)}°`;
+
+                if (totalTilt <= 4) {
+                    gyroBubble.style.background = '#4cd964';
+                    gyroBubble.style.boxShadow = '0 0 6px #4cd964';
+                    gyroTarget.style.borderColor = '#4cd964';
+                } else {
+                    gyroBubble.style.background = '#ff9500';
+                    gyroBubble.style.boxShadow = '0 0 5px #ff9500';
+                    gyroTarget.style.borderColor = 'rgba(255, 255, 255, 0.5)';
+                }
+            });
+        }
+
+        async function initCamera() {
+            const configs = [
+                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
+                { video: { facingMode: "environment" }, audio: false },
+                { video: true, audio: false }
+            ];
+
+            for (let config of configs) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(config);
+                    video.srcObject = stream;
+                    await video.play();
+                    return;
+                } catch (err) {}
+            }
+            alert('Не удалось подключить камеру. Закройте другие приложения камеры.');
+        }
+
+        threshSlider.oninput = () => {
+            threshVal.textContent = threshSlider.value;
+            if (isCaptured && lastRawMat) {
+                processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+            }
+        };
+
+        captureBtn.addEventListener('click', () => {
+            if (!cvReady) return;
+
+            if (!isCaptured) {
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const ctx = tempCanvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+
+                if (lastRawMat) lastRawMat.delete();
+                lastRawMat = cv.imread(tempCanvas);
+
+                video.style.display = 'none';
+                outputCanvas.style.display = 'block';
+                captureBtn.textContent = 'Новый замер';
+                isCaptured = true;
+
+                processFrame(lastRawMat, null);
+            } else {
+                outputCanvas.style.display = 'none';
+                video.style.display = 'block';
+                captureBtn.textContent = 'Измерить (Авто-захват)';
+                infoDisplay.textContent = 'Наведите камеру на квадратную рамку';
+                threshVal.textContent = 'Авто';
+                isCaptured = false;
+            }
+        });
+
+        function orderPoints(pts) {
+            let ptsArr = [];
+            for (let i = 0; i < 4; i++) ptsArr.push({ x: pts[i*2], y: pts[i*2+1] });
+
+            ptsArr.sort((a, b) => a.y - b.y);
+            let topTwo = [ptsArr[0], ptsArr[1]].sort((a, b) => a.x - b.x);
+            let botTwo = [ptsArr[2], ptsArr[3]].sort((a, b) => a.x - b.x);
+
+            return [topTwo[0], topTwo[1], botTwo[1], botTwo[0]];
+        }
+
+        function processFrame(srcMat, manualThreshold) {
+            let gray = new cv.Mat();
+            let blur = new cv.Mat();
+            let edged = new cv.Mat();
+
+            cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+            cv.Canny(blur, edged, 50, 150);
+
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let squareContour = null;
+            let maxArea = 0;
+
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let peri = cv.arcLength(cnt, true);
+                let approx = new cv.Mat();
+                cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+
+                if (approx.rows === 4) {
+                    let area = cv.contourArea(approx);
+                    if (area > 15000 && area > maxArea) {
+                        maxArea = area;
+                        if (squareContour) squareContour.delete();
+                        squareContour = approx.clone();
+                    }
+                }
+                approx.delete();
+                cnt.delete();
+            }
+
+            gray.delete(); blur.delete(); edged.delete(); hierarchy.delete(); contours.delete();
+
+            if (!squareContour) {
+                cv.imshow('output-canvas', srcMat);
+                infoDisplay.innerHTML = '<span style="color:#ff453a;">Рамка не найдена! Направьте камеру ближе к листу.</span>';
+                areaDisplay.textContent = '0.00 см²';
+                return;
+            }
+
+            const ordered = orderPoints(squareContour.data32S);
+            squareContour.delete();
+
+            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                ordered[0].x, ordered[0].y,
+                ordered[1].x, ordered[1].y,
+                ordered[2].x, ordered[2].y,
+                ordered[3].x, ordered[3].y
+            ]);
+
+            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                0, 0,
+                WARP_SIZE, 0,
+                WARP_SIZE, WARP_SIZE,
+                0, WARP_SIZE
+            ]);
+
+            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let warped = new cv.Mat();
+            cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
+
+            let pad = 25;
+            let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
+            let cropped = warped.roi(roiRect);
+
+            let cropGray = new cv.Mat();
+            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
+
+            let cropBlur = new cv.Mat();
+            cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
+
+            let rawMask = new cv.Mat();
+            let appliedThresh = manualThreshold;
+
+            if (appliedThresh === null) {
+                appliedThresh = Math.round(cv.threshold(cropBlur, rawMask, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU));
+                threshSlider.value = appliedThresh;
+                threshVal.textContent = appliedThresh + ' (Авто)';
+            } else {
+                cv.threshold(cropBlur, rawMask, appliedThresh, 255, cv.THRESH_BINARY_INV);
+                threshVal.textContent = appliedThresh;
+            }
+
+            let objContours = new cv.MatVector();
+            let objHierarchy = new cv.Mat();
+            cv.findContours(rawMask, objContours, objHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let solidMask = cv.Mat.zeros(cropped.rows, cropped.cols, cv.CV_8U);
+            let maxStoneArea = 0;
+            let stoneContourIdx = -1;
+
+            for (let i = 0; i < objContours.size(); i++) {
+                let area = cv.contourArea(objContours.get(i));
+                if (area > maxStoneArea) {
+                    maxStoneArea = area;
+                    stoneContourIdx = i;
+                }
+            }
+
+            if (stoneContourIdx !== -1) {
+                let colorWhite = new cv.Scalar(255);
+                cv.drawContours(solidMask, objContours, stoneContourIdx, colorWhite, -1);
+            }
+
+            let stonePixels = cv.countNonZero(solidMask);
+            let totalFramePixels = WARP_SIZE * WARP_SIZE;
+
+            for (let r = 0; r < cropped.rows; r++) {
+                for (let c = 0; c < cropped.cols; c++) {
+                    if (solidMask.ucharPtr(r, c)[0] > 0) {
+                        let ptr = cropped.ucharPtr(r, c);
+                        ptr[0] = 0;
+                        ptr[1] = 230;
+                        ptr[2] = 80;
+                    }
+                }
+            }
+
+            cv.imshow('output-canvas', warped);
+
+            const areaCm2 = (stonePixels / totalFramePixels) * REAL_AREA_CM2;
+            areaDisplay.textContent = areaCm2.toFixed(2) + ' см²';
+            infoDisplay.innerHTML = '<span style="color:#4cd964;">✓ Замер завершен, контур залит</span>';
+
+            srcTri.delete(); dstTri.delete(); M.delete(); warped.delete();
+            cropped.delete(); cropGray.delete(); cropBlur.delete();
+            rawMask.delete(); objContours.delete(); objHierarchy.delete(); solidMask.delete();
+        }
+
+        initCamera();
+    </script>
+</body>
+</html>
