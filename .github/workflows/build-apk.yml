@@ -1,0 +1,55 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install Cordova
+        run: npm install -g cordova
+
+      - name: Prepare Offline Assets and Build Project
+        run: |
+          # 1. Создаем каркас приложения
+          cordova create app com.div1kik.rockarea "RockArea"
+          cd app
+          rm -rf www/*
+          
+          # 2. Копируем файлы проекта внутрь приложения
+          cp -r ../* www/ || true
+          mkdir -p www/js
+          
+          # 3. Сервер САМ скачивает библиотеки внутрь пакета для 100% офлайна
+          curl -s https://docs.opencv.org/4.8.0/opencv.js -o www/js/opencv.js
+          curl -s https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js -o www/js/jszip.min.js
+          
+          # 4. Переключаем ссылки в index.html на скачанные локальные файлы
+          sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
+          sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
+          
+          # 5. Собираем готовый APK
+          cordova platform add android
+          cordova plugin add cordova-plugin-camera || true
+          cordova build android --debug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: RockArea-Offline-App
+          path: app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
