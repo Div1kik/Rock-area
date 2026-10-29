@@ -40,7 +40,6 @@
         }
         .app-title { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 
-        /* Окно видоискателя */
         .view-wrapper {
             position: relative;
             width: 100%;
@@ -63,7 +62,6 @@
             border-radius: 12px;
         }
 
-        /* Анимированное кольцо автофокуса (Tap-to-Focus) */
         .focus-indicator {
             position: absolute;
             width: 54px;
@@ -259,7 +257,6 @@
     </div>
 
     <div class="container">
-        <!-- Результат -->
         <div class="result-card">
             <div class="result-label">Площадь скола</div>
             <div class="result-val-wrap">
@@ -269,7 +266,6 @@
             <div class="info-msg" id="info-display">Нажмите на экран для точной фокусировки</div>
         </div>
 
-        <!-- Кнопки действий -->
         <div class="btn-row" id="main-btns-row">
             <button class="btn" id="capture-btn" disabled>
                 <span>📷</span> С камеры
@@ -282,7 +278,6 @@
         <input type="file" id="file-input" accept="image/*" style="display: none;">
         <button class="btn btn-secondary" id="reset-btn" style="display: none;">🔄 Новый замер</button>
 
-        <!-- Настройки геометрии шаблона -->
         <div class="panel-box">
             <div class="settings-grid">
                 <div class="input-group">
@@ -299,7 +294,6 @@
             </div>
         </div>
 
-        <!-- Панель сохранения в стек -->
         <div id="save-panel" class="panel-box" style="display: none;">
             <div class="input-group">
                 <label class="input-label" for="sample-name">Шифр керна / образца:</label>
@@ -308,7 +302,6 @@
             <button class="btn btn-green" id="save-record-btn">📥 Записать в журнал смены</button>
         </div>
 
-        <!-- Порог контраста -->
         <div class="panel-box">
             <div class="slider-row">
                 <span>Порог отсечения фона</span>
@@ -317,7 +310,6 @@
             <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
 
-        <!-- Журнал смены -->
         <div class="log-section">
             <div class="log-header">
                 <span class="log-title">Стек замеров (<span id="record-count">0</span>)</span>
@@ -406,7 +398,6 @@
             galleryBtn.disabled = false;
         }
 
-        // Датчик наклона (гироскоп)
         if (window.DeviceOrientationEvent) {
             window.addEventListener('deviceorientation', (e) => {
                 if (e.beta === null || e.gamma === null) return;
@@ -419,7 +410,6 @@
             });
         }
 
-        // Инициализация камеры со следящим автофокусом
         async function initCamera() {
             const configs = [
                 {
@@ -459,7 +449,6 @@
             } catch (e) {}
         }
 
-        // Фокусировка по тапу (Tap-to-Focus)
         viewWrapper.addEventListener('click', async (e) => {
             if (isCaptured || !videoTrack) return;
 
@@ -467,7 +456,6 @@
             const clickX = e.clientX - rect.left;
             const clickY = e.clientY - rect.top;
 
-            // Анимация кольца прицела
             focusIndicator.style.left = clickX + 'px';
             focusIndicator.style.top = clickY + 'px';
             focusIndicator.style.opacity = '1';
@@ -479,11 +467,9 @@
                 focusIndicator.style.transform = 'translate(-50%, -50%) scale(0.8)';
             }, 1200);
 
-            // Аппаратный триггер перефокусировки объектива
             try {
                 const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
                 if (caps.focusMode && caps.focusMode.includes('continuous')) {
-                    // Кратковременное переключение режима провоцирует повторную наводку на резкость
                     await videoTrack.applyConstraints({ advanced: [{ focusMode: 'auto' }] });
                     setTimeout(async () => {
                         await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
@@ -645,6 +631,48 @@
             }
         });
 
+        // -------------------------------------------------------------
+        // УНИВЕРСАЛЬНЫЙ БЛОК СОХРАНЕНИЯ ФАЙЛОВ (Cordova + Web)
+        // -------------------------------------------------------------
+        function saveBlobFile(blob, fileName) {
+            if (window.cordova && cordova.file) {
+                const targetDir = cordova.file.externalRootDirectory ? (cordova.file.externalRootDirectory + 'Download/') : cordova.file.dataDirectory;
+                
+                window.resolveLocalFileSystemURL(targetDir, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(fileWriter) {
+                            fileWriter.onwriteend = function() {
+                                alert('✓ Файл сохранён в папку "Загрузки" (Download):\n' + fileName);
+                            };
+                            fileWriter.onerror = function(e) {
+                                alert('Ошибка записи: ' + e.toString());
+                            };
+                            fileWriter.write(blob);
+                        });
+                    }, function(err) {
+                        alert('Ошибка создания файла: ' + JSON.stringify(err));
+                    });
+                }, function(err) {
+                    window.requestFileSystem(LocalFileSystem.PERSISTENT, 0, function(fs) {
+                        fs.root.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                            fileEntry.createWriter(function(fileWriter) {
+                                fileWriter.write(blob);
+                                alert('Файл сохранён в памяти приложения:\n' + fileName);
+                            });
+                        });
+                    });
+                });
+            } else {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        // 1. Выгрузка в Excel / CSV
         exportCsvBtn.addEventListener('click', () => {
             if (records.length === 0) return alert('Журнал пуст!');
             let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
@@ -652,37 +680,36 @@
                 csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
             });
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `Журнал_испытаний_${new Date().toISOString().slice(0,10)}.csv`;
-            link.click();
+            saveBlobFile(blob, `Журнал_испытаний_${new Date().toISOString().slice(0,10)}.csv`);
         });
 
+        // 2. Пакетная выгрузка ZIP-архива
         exportZipBtn.addEventListener('click', async () => {
             if (records.length === 0) return alert('Журнал пуст!');
             exportZipBtn.disabled = true;
             exportZipBtn.textContent = 'Сжатие...';
 
-            const zip = new JSZip();
-            const folderRaw = zip.folder("1_Исходники");
-            const folderMasks = zip.folder("2_Контуры_маски");
+            try {
+                const zip = new JSZip();
+                const folderRaw = zip.folder("1_Исходники");
+                const folderMasks = zip.folder("2_Контуры_маски");
 
-            records.forEach((rec, idx) => {
-                const prefix = `${idx + 1}_${rec.name}`;
-                const rawBase64 = rec.rawImg.replace(/^data:image\/jpeg;base64,/, "");
-                const maskBase64 = rec.maskImg.replace(/^data:image\/jpeg;base64,/, "");
-                folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-            });
+                records.forEach((rec, idx) => {
+                    const prefix = `${idx + 1}_${rec.name}`;
+                    const rawBase64 = rec.rawImg.replace(/^data:image\/jpeg;base64,/, "");
+                    const maskBase64 = rec.maskImg.replace(/^data:image\/jpeg;base64,/, "");
+                    folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
+                    folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
+                });
 
-            const content = await zip.generateAsync({ type: "blob" });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(content);
-            link.download = `Фотоархив_сколов_${new Date().toISOString().slice(0,10)}.zip`;
-            link.click();
-
-            exportZipBtn.disabled = false;
-            exportZipBtn.textContent = '📦 Фотопак (ZIP)';
+                const content = await zip.generateAsync({ type: "blob" });
+                saveBlobFile(content, `Фотоархив_сколов_${new Date().toISOString().slice(0,10)}.zip`);
+            } catch (err) {
+                alert('Ошибка упаковки архива: ' + err);
+            } finally {
+                exportZipBtn.disabled = false;
+                exportZipBtn.textContent = '📦 Фотопак (ZIP)';
+            }
         });
 
         function orderPoints(ptsArr) {
@@ -862,31 +889,28 @@
 
         renderTable();
 
-function startAppCamera() {
-    // Если запущено внутри Cordova, запрашиваем системное разрешение Android
-    if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
-        const permissions = cordova.plugins.permissions;
-        permissions.requestPermission(permissions.CAMERA, function(status) {
-            if (status.hasPermission) {
-                initCamera();
+        function startAppCamera() {
+            if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
+                const permissions = cordova.plugins.permissions;
+                permissions.requestPermission(permissions.CAMERA, function(status) {
+                    if (status.hasPermission) {
+                        initCamera();
+                    } else {
+                        alert('Для работы прибора требуется доступ к камере.');
+                    }
+                }, function() {
+                    initCamera();
+                });
             } else {
-                alert('Для работы прибора требуется доступ к камере в настройках приложения.');
+                initCamera();
             }
-        }, function() {
-            initCamera();
-        });
-    } else {
-        // Обычный браузер / PWA
-        initCamera();
-    }
-}
+        }
 
-if (window.cordova) {
-    document.addEventListener('deviceready', startAppCamera, false);
-} else {
-    document.addEventListener('DOMContentLoaded', startAppCamera);
-}
-
+        if (window.cordova) {
+            document.addEventListener('deviceready', startAppCamera, false);
+        } else {
+            document.addEventListener('DOMContentLoaded', startAppCamera);
+        }
     </script>
 </body>
 </html>
