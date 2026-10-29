@@ -75,5 +75,526 @@
         .btn-secondary { background: #2c2c2e; border: 1px solid #444; }
         .btn-green { background: #34c759; }
         .btn-outline { background: transparent; border: 1px solid #555; color: #ddd; padding: 8px; font-size: 13px; }
-        .btn-red { background: #ff3b30; padding: 6px 10px; font-size: 
+        .btn-red { background: #ff3b30; padding: 6px 10px; font-size: 12px; }
 
+        .input-group { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #ccc; }
+        .input-text { background: #1c1c1e; border: 1px solid #333; color: #fff; padding: 9px; border-radius: 8px; font-size: 15px; }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            color: #ccc;
+            background: #1c1c1e;
+            padding: 6px 10px;
+            border-radius: 8px;
+        }
+        .slider-row { display: flex; justify-content: space-between; }
+
+        .result-card {
+            margin-top: 10px;
+            width: 320px;
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .result-val { font-size: 1.8rem; color: #4cd964; font-weight: 700; margin: 2px 0; }
+
+        .log-section {
+            width: 320px;
+            margin-top: 16px;
+            margin-bottom: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .table-wrap {
+            max-height: 180px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background: #181818;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid #282828; }
+        th { background: #222; color: #888; position: sticky; top: 0; }
+        .export-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+    <h1>Лабораторный замер скола</h1>
+
+    <div class="view-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output-canvas" style="display: none;"></canvas>
+        <div class="status-badge" id="status-badge">Загрузка CV...</div>
+
+        <div class="gyro-widget" id="gyro-box">
+            <div class="gyro-target"></div>
+            <div class="gyro-bubble" id="gyro-bubble"></div>
+            <span class="gyro-label" id="gyro-label">0°</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <!-- Блок кнопок: С камеры / Из галереи -->
+        <div class="btn-row" id="main-btns-row">
+            <button class="btn" id="capture-btn" disabled>📷 С камеры</button>
+            <button class="btn btn-secondary" id="gallery-btn" disabled>📁 Из галереи</button>
+        </div>
+        
+        <!-- Скрытый инпут для выбора фото -->
+        <input type="file" id="file-input" accept="image/*" style="display: none;">
+
+        <button class="btn btn-secondary" id="reset-btn" style="display: none;">Новый замер</button>
+
+        <div id="save-panel" style="display: none; flex-direction: column; gap: 6px;">
+            <div class="input-group">
+                <label for="sample-name">Шифр образца / керна:</label>
+                <input type="text" id="sample-name" class="input-text" placeholder="Керн-1">
+            </div>
+            <button class="btn btn-green" id="save-record-btn">📥 Записать в журнал смены</button>
+        </div>
+
+        <div class="slider-group">
+            <div class="slider-row">
+                <span>Порог фона:</span>
+                <span id="thresh-val">Авто</span>
+            </div>
+            <input type="range" id="thresh-slider" min="30" max="220" value="110">
+        </div>
+    </div>
+
+    <div class="result-card">
+        <div>Определенная площадь разрыва:</div>
+        <div class="result-val" id="area-display">0.00 см²</div>
+        <div style="font-size: 11px; color: #aaa;" id="info-display">Наведите камеру или загрузите фото с рамкой</div>
+    </div>
+
+    <div class="log-section">
+        <div class="log-header">
+            <span>Журнал смены (<span id="record-count">0</span>)</span>
+            <button class="btn btn-outline" style="padding: 3px 8px; font-size: 11px;" id="clear-all-btn">Очистить всё</button>
+        </div>
+        
+        <div class="table-wrap">
+            <table id="log-table">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Шифр</th>
+                        <th>S, см²</th>
+                        <th>Время</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="log-tbody"></tbody>
+            </table>
+        </div>
+
+        <div class="export-btns">
+            <button class="btn btn-outline" id="export-csv-btn">📊 Excel / CSV</button>
+            <button class="btn btn-outline" id="export-zip-btn">📦 Фотопак (ZIP)</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const outputCanvas = document.getElementById('output-canvas');
+        const captureBtn = document.getElementById('capture-btn');
+        const galleryBtn = document.getElementById('gallery-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const mainBtnsRow = document.getElementById('main-btns-row');
+        const fileInput = document.getElementById('file-input');
+
+        const savePanel = document.getElementById('save-panel');
+        const saveRecordBtn = document.getElementById('save-record-btn');
+        const sampleNameInput = document.getElementById('sample-name');
+        const statusBadge = document.getElementById('status-badge');
+        const threshSlider = document.getElementById('thresh-slider');
+        const threshVal = document.getElementById('thresh-val');
+        const areaDisplay = document.getElementById('area-display');
+        const infoDisplay = document.getElementById('info-display');
+
+        const gyroBox = document.getElementById('gyro-box');
+        const gyroBubble = document.getElementById('gyro-bubble');
+        const gyroLabel = document.getElementById('gyro-label');
+
+        const logTbody = document.getElementById('log-tbody');
+        const recordCount = document.getElementById('record-count');
+        const exportCsvBtn = document.getElementById('export-csv-btn');
+        const exportZipBtn = document.getElementById('export-zip-btn');
+        const clearAllBtn = document.getElementById('clear-all-btn');
+
+        const REAL_FRAME_SIDE_MM = 100.0;
+        const REAL_AREA_CM2 = (REAL_FRAME_SIDE_MM * REAL_FRAME_SIDE_MM) / 100.0;
+        const WARP_SIZE = 500;
+
+        let cvReady = false;
+        let isCaptured = false;
+        let lastRawMat = null;
+        let lastRawCroppedCanvas = null;
+        let currentCalculatedArea = "0.00";
+        let currentThreshApplied = 110;
+
+        let records = JSON.parse(localStorage.getItem('rock_test_records') || '[]');
+
+        function onOpenCvReady() {
+            cvReady = true;
+            statusBadge.textContent = 'Готов к работе';
+            statusBadge.style.color = '#4cd964';
+            captureBtn.disabled = false;
+            galleryBtn.disabled = false;
+        }
+
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', (e) => {
+                if (e.beta === null || e.gamma === null) return;
+                let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
+                let y = Math.max(-14, Math.min(14, e.beta * 0.7));
+                gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
+                const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
+                gyroLabel.textContent = `${Math.round(totalTilt)}°`;
+                gyroBubble.style.background = totalTilt <= 4 ? '#4cd964' : '#ff9500';
+            });
+        }
+
+        async function initCamera() {
+            const configs = [
+                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
+                { video: { facingMode: "environment" }, audio: false },
+                { video: true, audio: false }
+            ];
+
+            for (let config of configs) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(config);
+                    video.srcObject = stream;
+                    await video.play();
+                    return;
+                } catch (err) {}
+            }
+        }
+
+        threshSlider.oninput = () => {
+            threshVal.textContent = threshSlider.value;
+            if (isCaptured && lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+        };
+
+        function showResultMode() {
+            isCaptured = true;
+            video.style.display = 'none';
+            outputCanvas.style.display = 'block';
+            gyroBox.style.display = 'none';
+            mainBtnsRow.style.display = 'none';
+            resetBtn.style.display = 'block';
+            savePanel.style.display = 'flex';
+            sampleNameInput.value = `Керн-${records.length + 1}`;
+        }
+
+        function resetToLiveMode() {
+            isCaptured = false;
+            outputCanvas.style.display = 'none';
+            video.style.display = 'block';
+            gyroBox.style.display = 'flex';
+            mainBtnsRow.style.display = 'grid';
+            resetBtn.style.display = 'none';
+            savePanel.style.display = 'none';
+            infoDisplay.textContent = 'Наведите камеру или загрузите фото с рамкой';
+            threshVal.textContent = 'Авто';
+            fileInput.value = '';
+        }
+
+        // 1. Захват с камеры
+        captureBtn.addEventListener('click', () => {
+            if (!cvReady) return;
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            tempCanvas.getContext('2d').drawImage(video, 0, 0);
+
+            if (lastRawMat) lastRawMat.delete();
+            lastRawMat = cv.imread(tempCanvas);
+
+            showResultMode();
+            processFrame(lastRawMat, null);
+        });
+
+        // 2. Загрузка из галереи
+        galleryBtn.addEventListener('click', () => {
+            if (!cvReady) return;
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = img.width;
+                    tempCanvas.height = img.height;
+                    tempCanvas.getContext('2d').drawImage(img, 0, 0);
+
+                    if (lastRawMat) lastRawMat.delete();
+                    lastRawMat = cv.imread(tempCanvas);
+
+                    showResultMode();
+                    processFrame(lastRawMat, null);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        resetBtn.addEventListener('click', resetToLiveMode);
+
+        saveRecordBtn.addEventListener('click', () => {
+            const name = sampleNameInput.value.trim() || `Образец-${records.length + 1}`;
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = now.toISOString().slice(0, 10);
+
+            const rawPhotoData = lastRawCroppedCanvas.toDataURL('image/jpeg', 0.85);
+            const maskPhotoData = outputCanvas.toDataURL('image/jpeg', 0.85);
+
+            const record = {
+                id: Date.now(),
+                name: name,
+                area: currentCalculatedArea,
+                date: dateStr,
+                time: timeStr,
+                threshold: currentThreshApplied,
+                rawImg: rawPhotoData,
+                maskImg: maskPhotoData
+            };
+
+            records.push(record);
+            saveRecordsToStorage();
+            renderTable();
+
+            infoDisplay.innerHTML = `<span style="color:#4cd964;">✓ Записан в журнал: ${name}</span>`;
+            savePanel.style.display = 'none';
+        });
+
+        function saveRecordsToStorage() {
+            try {
+                localStorage.setItem('rock_test_records', JSON.stringify(records));
+            } catch (e) {
+                alert('Память браузера переполнена! Экспортируйте фотопак (ZIP) и очистите журнал.');
+            }
+        }
+
+        function renderTable() {
+            logTbody.innerHTML = '';
+            recordCount.textContent = records.length;
+
+            records.forEach((rec, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td><b>${rec.name}</b></td>
+                    <td style="color:#4cd964; font-weight:600;">${rec.area}</td>
+                    <td style="color:#888;">${rec.time}</td>
+                    <td><button class="btn btn-red" onclick="deleteRecord(${rec.id})">✕</button></td>
+                `;
+                logTbody.appendChild(tr);
+            });
+        }
+
+        window.deleteRecord = function(id) {
+            records = records.filter(r => r.id !== id);
+            saveRecordsToStorage();
+            renderTable();
+        };
+
+        clearAllBtn.addEventListener('click', () => {
+            if (records.length === 0) return;
+            if (confirm('Очистить весь журнал смены? Убедитесь, что выгрузили Excel/ZIP.')) {
+                records = [];
+                saveRecordsToStorage();
+                renderTable();
+            }
+        });
+
+        exportCsvBtn.addEventListener('click', () => {
+            if (records.length === 0) return alert('Журнал пуст!');
+
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);Дата;Время;Порог отсечения\n';
+            records.forEach((rec, idx) => {
+                csv += `${idx + 1};${rec.name};${rec.area};${rec.date};${rec.time};${rec.threshold}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `Журнал_испытаний_${new Date().toISOString().slice(0,10)}.csv`;
+            link.click();
+        });
+
+        exportZipBtn.addEventListener('click', async () => {
+            if (records.length === 0) return alert('Журнал пуст!');
+
+            exportZipBtn.disabled = true;
+            exportZipBtn.textContent = 'Сжатие...';
+
+            const zip = new JSZip();
+            const folderRaw = zip.folder("1_Исходники");
+            const folderMasks = zip.folder("2_Контуры_маски");
+
+            records.forEach((rec, idx) => {
+                const prefix = `${idx + 1}_${rec.name}`;
+                const rawBase64 = rec.rawImg.replace(/^data:image\/jpeg;base64,/, "");
+                const maskBase64 = rec.maskImg.replace(/^data:image\/jpeg;base64,/, "");
+
+                folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
+                folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
+            });
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = `Фотоархив_сколов_${new Date().toISOString().slice(0,10)}.zip`;
+            link.click();
+
+            exportZipBtn.disabled = false;
+            exportZipBtn.textContent = '📦 Фотопак (ZIP)';
+        });
+
+        function orderPoints(pts) {
+            let ptsArr = [];
+            for (let i = 0; i < 4; i++) ptsArr.push({ x: pts[i*2], y: pts[i*2+1] });
+            ptsArr.sort((a, b) => a.y - b.y);
+            let topTwo = [ptsArr[0], ptsArr[1]].sort((a, b) => a.x - b.x);
+            let botTwo = [ptsArr[2], ptsArr[3]].sort((a, b) => a.x - b.x);
+            return [topTwo[0], topTwo[1], botTwo[1], botTwo[0]];
+        }
+
+        function processFrame(srcMat, manualThreshold) {
+            let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
+            cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+            cv.Canny(blur, edged, 50, 150);
+
+            let contours = new cv.MatVector(), hierarchy = new cv.Mat();
+            cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let squareContour = null, maxArea = 0;
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let peri = cv.arcLength(cnt, true);
+                let approx = new cv.Mat();
+                cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+                if (approx.rows === 4) {
+                    let area = cv.contourArea(approx);
+                    if (area > 15000 && area > maxArea) {
+                        maxArea = area;
+                        if (squareContour) squareContour.delete();
+                        squareContour = approx.clone();
+                    }
+                }
+                approx.delete(); cnt.delete();
+            }
+            gray.delete(); blur.delete(); edged.delete(); hierarchy.delete(); contours.delete();
+
+            if (!squareContour) {
+                cv.imshow('output-canvas', srcMat);
+                infoDisplay.innerHTML = '<span style="color:#ff453a;">Рамка не найдена на фото!</span>';
+                areaDisplay.textContent = '0.00 см²';
+                return;
+            }
+
+            const ordered = orderPoints(squareContour.data32S);
+            squareContour.delete();
+
+            let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                ordered[0].x, ordered[0].y,
+                ordered[1].x, ordered[1].y,
+                ordered[2].x, ordered[2].y,
+                ordered[3].x, ordered[3].y
+            ]);
+            let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, WARP_SIZE, 0, WARP_SIZE, WARP_SIZE, 0, WARP_SIZE]);
+            let M = cv.getPerspectiveTransform(srcTri, dstTri);
+            let warped = new cv.Mat();
+            cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
+
+            let pad = 25;
+            let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
+            let cropped = warped.roi(roiRect);
+
+            lastRawCroppedCanvas = document.createElement('canvas');
+            lastRawCroppedCanvas.width = cropped.cols;
+            lastRawCroppedCanvas.height = cropped.rows;
+            cv.imshow(lastRawCroppedCanvas, cropped);
+
+            let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
+            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
+
+            let rawMask = new cv.Mat();
+            let appliedThresh = manualThreshold;
+            if (appliedThresh === null) {
+                appliedThresh = Math.round(cv.threshold(cropBlur, rawMask, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU));
+                threshSlider.value = appliedThresh;
+                threshVal.textContent = appliedThresh + ' (Авто)';
+            } else {
+                cv.threshold(cropBlur, rawMask, appliedThresh, 255, cv.THRESH_BINARY_INV);
+                threshVal.textContent = appliedThresh;
+            }
+            currentThreshApplied = appliedThresh;
+
+            let objContours = new cv.MatVector(), objHierarchy = new cv.Mat();
+            cv.findContours(rawMask, objContours, objHierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let solidMask = cv.Mat.zeros(cropped.rows, cropped.cols, cv.CV_8U);
+            let maxStoneArea = 0, stoneContourIdx = -1;
+            for (let i = 0; i < objContours.size(); i++) {
+                let a = cv.contourArea(objContours.get(i));
+                if (a > maxStoneArea) { maxStoneArea = a; stoneContourIdx = i; }
+            }
+
+            if (stoneContourIdx !== -1) {
+                cv.drawContours(solidMask, objContours, stoneContourIdx, new cv.Scalar(255), -1);
+            }
+
+            let stonePixels = cv.countNonZero(solidMask);
+            currentCalculatedArea = ((stonePixels / (WARP_SIZE * WARP_SIZE)) * REAL_AREA_CM2).toFixed(2);
+
+            for (let r = 0; r < cropped.rows; r++) {
+                for (let c = 0; c < cropped.cols; c++) {
+                    if (solidMask.ucharPtr(r, c)[0] > 0) {
+                        let ptr = cropped.ucharPtr(r, c);
+                        ptr[0] = 0; ptr[1] = 230; ptr[2] = 80;
+                    }
+                }
+            }
+
+            cv.imshow('output-canvas', warped);
+            areaDisplay.textContent = currentCalculatedArea + ' см²';
+            infoDisplay.innerHTML = '<span style="color:#4cd964;">✓ Замер завершен, нажмите записать</span>';
+
+            srcTri.delete(); dstTri.delete(); M.delete(); warped.delete();
+            cropped.delete(); cropGray.delete(); cropBlur.delete();
+            rawMask.delete(); objContours.delete(); objHierarchy.delete(); solidMask.delete();
+        }
+
+        renderTable();
+        initCamera();
+    </script>
+</body>
+</html>
