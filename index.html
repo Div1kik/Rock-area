@@ -40,6 +40,7 @@
         }
         .app-title { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 
+        /* Окно видоискателя */
         .view-wrapper {
             position: relative;
             width: 100%;
@@ -49,6 +50,7 @@
             overflow: hidden;
             background: #000;
             box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--card-border);
+            cursor: crosshair;
         }
 
         video, canvas { width: 100%; height: 100%; object-fit: cover; }
@@ -59,6 +61,31 @@
             pointer-events: none;
             border: 2px dashed rgba(255, 255, 255, 0.15);
             border-radius: 12px;
+        }
+
+        /* Анимированное кольцо автофокуса (Tap-to-Focus) */
+        .focus-indicator {
+            position: absolute;
+            width: 54px;
+            height: 54px;
+            border: 2px solid #ffd600;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(1.4);
+            transition: opacity 0.2s, transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 25;
+            box-shadow: 0 0 10px rgba(255, 214, 0, 0.4);
+        }
+        .focus-indicator::after {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 5px;
+            background: #ffd600;
         }
 
         .status-badge {
@@ -155,11 +182,7 @@
             gap: 10px;
         }
 
-        .settings-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
+        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .input-group { display: flex; flex-direction: column; gap: 4px; }
         .input-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
 
@@ -217,10 +240,11 @@
         </div>
     </header>
 
-    <div class="view-wrapper">
+    <div class="view-wrapper" id="view-wrapper">
         <video id="webcam" autoplay playsinline></video>
         <canvas id="output-canvas" style="display: none;"></canvas>
         <div class="reticle-corners"></div>
+        <div class="focus-indicator" id="focus-indicator"></div>
 
         <div class="status-badge" id="status-badge">
             <span class="status-dot"></span>
@@ -242,7 +266,7 @@
                 <span class="result-val" id="area-display">0.00</span>
                 <span class="result-unit">см²</span>
             </div>
-            <div class="info-msg" id="info-display">Наведите видоискатель на калибровочную зону</div>
+            <div class="info-msg" id="info-display">Нажмите на экран для точной фокусировки</div>
         </div>
 
         <!-- Кнопки действий -->
@@ -324,6 +348,8 @@
 
     <script>
         const video = document.getElementById('webcam');
+        const viewWrapper = document.getElementById('view-wrapper');
+        const focusIndicator = document.getElementById('focus-indicator');
         const outputCanvas = document.getElementById('output-canvas');
         const captureBtn = document.getElementById('capture-btn');
         const galleryBtn = document.getElementById('gallery-btn');
@@ -362,6 +388,8 @@
         let lastRawCroppedCanvas = null;
         let currentCalculatedArea = "0.00";
         let currentThreshApplied = 110;
+        let videoTrack = null;
+        let focusTimer = null;
 
         let records = JSON.parse(localStorage.getItem('rock_test_records') || '[]');
 
@@ -378,6 +406,7 @@
             galleryBtn.disabled = false;
         }
 
+        // Датчик наклона (гироскоп)
         if (window.DeviceOrientationEvent) {
             window.addEventListener('deviceorientation', (e) => {
                 if (e.beta === null || e.gamma === null) return;
@@ -390,8 +419,17 @@
             });
         }
 
+        // Инициализация камеры со следящим автофокусом
         async function initCamera() {
             const configs = [
+                {
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1920 },
+                        advanced: [{ focusMode: "continuous" }]
+                    },
+                    audio: false
+                },
                 { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
                 { video: { facingMode: "environment" }, audio: false },
                 { video: true, audio: false }
@@ -402,10 +440,57 @@
                     const stream = await navigator.mediaDevices.getUserMedia(config);
                     video.srcObject = stream;
                     await video.play();
+                    videoTrack = stream.getVideoTracks()[0];
+                    applyContinuousFocus();
                     return;
                 } catch (err) {}
             }
         }
+
+        async function applyContinuousFocus() {
+            if (!videoTrack) return;
+            try {
+                const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    await videoTrack.applyConstraints({
+                        advanced: [{ focusMode: 'continuous' }]
+                    });
+                }
+            } catch (e) {}
+        }
+
+        // Фокусировка по тапу (Tap-to-Focus)
+        viewWrapper.addEventListener('click', async (e) => {
+            if (isCaptured || !videoTrack) return;
+
+            const rect = viewWrapper.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // Анимация кольца прицела
+            focusIndicator.style.left = clickX + 'px';
+            focusIndicator.style.top = clickY + 'px';
+            focusIndicator.style.opacity = '1';
+            focusIndicator.style.transform = 'translate(-50%, -50%) scale(1)';
+
+            clearTimeout(focusTimer);
+            focusTimer = setTimeout(() => {
+                focusIndicator.style.opacity = '0';
+                focusIndicator.style.transform = 'translate(-50%, -50%) scale(0.8)';
+            }, 1200);
+
+            // Аппаратный триггер перефокусировки объектива
+            try {
+                const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    // Кратковременное переключение режима провоцирует повторную наводку на резкость
+                    await videoTrack.applyConstraints({ advanced: [{ focusMode: 'auto' }] });
+                    setTimeout(async () => {
+                        await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                    }, 400);
+                }
+            } catch (err) {}
+        });
 
         threshSlider.oninput = () => {
             threshVal.textContent = threshSlider.value;
@@ -439,9 +524,10 @@
             mainBtnsRow.style.display = 'grid';
             resetBtn.style.display = 'none';
             savePanel.style.display = 'none';
-            infoDisplay.textContent = 'Наведите видоискатель на калибровочную зону';
+            infoDisplay.textContent = 'Нажмите на экран для точной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
+            applyContinuousFocus();
         }
 
         captureBtn.addEventListener('click', () => {
@@ -606,7 +692,6 @@
             return [topTwo[0], topTwo[1], botTwo[1], botTwo[0]];
         }
 
-        // 1. Поиск сплошной замкнутой рамки
         function findFrameQuad(edged, minArea) {
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
@@ -640,7 +725,6 @@
             return bestQuad;
         }
 
-        // 2. Поиск 4 угловых маркеров-квадратиков
         function findFourCornersQuad(grayMat) {
             let bin = new cv.Mat();
             cv.threshold(grayMat, bin, 80, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
@@ -653,7 +737,6 @@
             for (let i = 0; i < contours.size(); i++) {
                 let cnt = contours.get(i);
                 let a = cv.contourArea(cnt);
-                // Ищем небольшие компактные метки
                 if (a > 100 && a < 15000) {
                     let rect = cv.boundingRect(cnt);
                     let ratio = rect.width / rect.height;
@@ -670,7 +753,6 @@
 
             if (candidates.length < 4) return null;
 
-            // Выбираем 4 наиболее удалённые по углам точки
             candidates.sort((a, b) => (a.x + a.y) - (b.x + b.y));
             let topLeft = candidates[0];
             let bottomRight = candidates[candidates.length - 1];
@@ -717,7 +799,6 @@
             let warped = new cv.Mat();
             cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
 
-            // Отступ внутрь: для рамки срезаем саму линию (25px), для маркеров отступ минимален (10px)
             let pad = mode === 'frame' ? 25 : 10;
             let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
             let cropped = warped.roi(roiRect);
