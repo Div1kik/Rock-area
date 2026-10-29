@@ -2,143 +2,230 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Лабораторный планиметр керна</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-        body { background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 12px; }
-        h1 { font-size: 1.1rem; margin-bottom: 6px; font-weight: 500; }
+        :root {
+            --bg-main: #0c0d11;
+            --card-bg: rgba(26, 29, 36, 0.85);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --accent-green: #00e676;
+            --accent-blue: #2979ff;
+            --accent-red: #ff3d71;
+            --text-main: #ffffff;
+            --text-muted: #8e95a5;
+        }
 
-        .view-container {
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body {
+            background: var(--bg-main);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px 14px 40px;
+            min-height: 100vh;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        header {
+            width: 100%;
+            max-width: 380px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .app-title { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+        .view-wrapper {
             position: relative;
-            width: 320px;
-            height: 320px;
-            border-radius: 8px;
+            width: 100%;
+            max-width: 360px;
+            aspect-ratio: 1 / 1;
+            border-radius: 20px;
             overflow: hidden;
             background: #000;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--card-border);
         }
 
         video, canvas { width: 100%; height: 100%; object-fit: cover; }
 
+        .reticle-corners {
+            position: absolute;
+            inset: 20px;
+            pointer-events: none;
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+        }
+
         .status-badge {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            padding: 4px 8px;
-            border-radius: 4px;
+            top: 14px;
+            left: 14px;
+            padding: 6px 12px;
+            border-radius: 20px;
             font-size: 11px;
-            background: rgba(0,0,0,0.7);
-            color: #ff9500;
+            font-weight: 600;
+            background: rgba(12, 13, 17, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--card-border);
+            color: #ffab00;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             z-index: 10;
         }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
         .gyro-widget {
             position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 46px;
-            height: 46px;
+            top: 14px;
+            right: 14px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
-            background: rgba(20, 20, 20, 0.75);
-            border: 1.5px solid rgba(255, 255, 255, 0.3);
+            background: rgba(12, 13, 17, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--card-border);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 10;
         }
-        .gyro-target { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 1px dashed rgba(255,255,255,0.5); }
-        .gyro-bubble { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ff9500; box-shadow: 0 0 5px #ff9500; transition: transform 0.05s linear; }
-        .gyro-label { position: absolute; bottom: -15px; font-size: 9px; color: #aaa; }
+        .gyro-target { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 1px dashed rgba(255,255,255,0.4); }
+        .gyro-bubble { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ffab00; box-shadow: 0 0 8px #ffab00; transition: transform 0.05s linear; }
+        .gyro-label { position: absolute; bottom: -17px; font-size: 9px; font-weight: 600; color: var(--text-muted); }
 
-        .controls { width: 320px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-
-        .btn-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-
-        .btn {
-            background: #007aff;
-            color: white;
-            border: none;
-            padding: 12px;
-            font-size: 14px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            text-align: center;
-        }
-        .btn:disabled { background: #444; color: #888; }
-        .btn-secondary { background: #2c2c2e; border: 1px solid #444; }
-        .btn-green { background: #34c759; }
-        .btn-outline { background: transparent; border: 1px solid #555; color: #ddd; padding: 8px; font-size: 13px; }
-        .btn-red { background: #ff3b30; padding: 6px 10px; font-size: 12px; }
-
-        .input-group { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #ccc; }
-        .input-text { background: #1c1c1e; border: 1px solid #333; color: #fff; padding: 9px; border-radius: 8px; font-size: 15px; }
-
-        .slider-group {
+        .container {
+            width: 100%;
+            max-width: 360px;
             display: flex;
             flex-direction: column;
-            gap: 4px;
-            font-size: 12px;
-            color: #ccc;
-            background: #1c1c1e;
-            padding: 6px 10px;
-            border-radius: 8px;
+            gap: 12px;
+            margin-top: 14px;
         }
-        .slider-row { display: flex; justify-content: space-between; }
 
         .result-card {
-            margin-top: 10px;
-            width: 320px;
-            background: #1e1e1e;
-            padding: 10px;
-            border-radius: 8px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 16px;
             text-align: center;
-            border: 1px solid #333;
+            backdrop-filter: blur(12px);
         }
-        .result-val { font-size: 1.8rem; color: #4cd964; font-weight: 700; margin: 2px 0; }
+        .result-label { font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-val-wrap { display: flex; align-items: baseline; justify-content: center; gap: 4px; margin: 4px 0; }
+        .result-val { font-size: 2.4rem; color: var(--accent-green); font-weight: 800; font-feature-settings: "tnum"; }
+        .result-unit { font-size: 1.1rem; color: var(--accent-green); font-weight: 600; }
+        .info-msg { font-size: 12px; color: var(--text-muted); }
 
-        .log-section {
-            width: 320px;
-            margin-top: 16px;
-            margin-bottom: 30px;
+        .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .btn {
+            background: var(--accent-blue);
+            color: #fff;
+            border: none;
+            padding: 14px 16px;
+            font-size: 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.15s ease;
+            box-shadow: 0 4px 12px rgba(41, 121, 255, 0.25);
+        }
+        .btn:active:not(:disabled) { transform: scale(0.97); }
+        .btn:disabled { background: #1f2229; color: #4e5566; box-shadow: none; cursor: not-allowed; }
+        .btn-secondary { background: #1c1f26; border: 1px solid var(--card-border); color: #fff; box-shadow: none; }
+        .btn-green { background: var(--accent-green); color: #000; box-shadow: 0 4px 14px rgba(0, 230, 118, 0.3); }
+        .btn-red { background: rgba(255, 61, 113, 0.15); border: 1px solid rgba(255, 61, 113, 0.3); color: var(--accent-red); padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+
+        .panel-box {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 12px 14px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
         }
-        .log-header {
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        .input-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+
+        select, .input-text {
+            background: #12141a;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 13px;
+            outline: none;
+            width: 100%;
+        }
+        select:focus, .input-text:focus { border-color: var(--accent-blue); }
+
+        .slider-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); font-weight: 500; }
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #1f2229;
+            accent-color: var(--accent-blue);
+            outline: none;
+        }
+
+        .log-section {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 14px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 14px;
-            font-weight: 600;
+            flex-direction: column;
+            gap: 10px;
         }
+        .log-header { display: flex; justify-content: space-between; align-items: center; }
+        .log-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
         .table-wrap {
-            max-height: 180px;
+            max-height: 190px;
             overflow-y: auto;
-            border: 1px solid #333;
-            border-radius: 6px;
-            background: #181818;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
-        th, td { padding: 6px 8px; border-bottom: 1px solid #282828; }
-        th { background: #222; color: #888; position: sticky; top: 0; }
-        .export-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+        th, td { padding: 9px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
+        th { background: #161820; color: var(--text-muted); font-weight: 500; position: sticky; top: 0; }
+        .export-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
     </style>
 </head>
 <body>
 
-    <h1>Лабораторный замер скола</h1>
+    <header>
+        <div class="app-title">
+            <span>📐</span>
+            <span>Rock Area Core</span>
+        </div>
+    </header>
 
-    <div class="view-container">
+    <div class="view-wrapper">
         <video id="webcam" autoplay playsinline></video>
         <canvas id="output-canvas" style="display: none;"></canvas>
-        <div class="status-badge" id="status-badge">Загрузка CV...</div>
+        <div class="reticle-corners"></div>
+
+        <div class="status-badge" id="status-badge">
+            <span class="status-dot"></span>
+            <span id="status-text">Инициализация CV...</span>
+        </div>
 
         <div class="gyro-widget" id="gyro-box">
             <div class="gyro-target"></div>
@@ -147,65 +234,91 @@
         </div>
     </div>
 
-    <div class="controls">
-        <!-- Блок кнопок: С камеры / Из галереи -->
+    <div class="container">
+        <!-- Результат -->
+        <div class="result-card">
+            <div class="result-label">Площадь скола</div>
+            <div class="result-val-wrap">
+                <span class="result-val" id="area-display">0.00</span>
+                <span class="result-unit">см²</span>
+            </div>
+            <div class="info-msg" id="info-display">Наведите видоискатель на калибровочную зону</div>
+        </div>
+
+        <!-- Кнопки действий -->
         <div class="btn-row" id="main-btns-row">
-            <button class="btn" id="capture-btn" disabled>📷 С камеры</button>
-            <button class="btn btn-secondary" id="gallery-btn" disabled>📁 Из галереи</button>
+            <button class="btn" id="capture-btn" disabled>
+                <span>📷</span> С камеры
+            </button>
+            <button class="btn btn-secondary" id="gallery-btn" disabled>
+                <span>📁</span> Из галереи
+            </button>
         </div>
         
-        <!-- Скрытый инпут для выбора фото -->
         <input type="file" id="file-input" accept="image/*" style="display: none;">
+        <button class="btn btn-secondary" id="reset-btn" style="display: none;">🔄 Новый замер</button>
 
-        <button class="btn btn-secondary" id="reset-btn" style="display: none;">Новый замер</button>
+        <!-- Настройки геометрии шаблона -->
+        <div class="panel-box">
+            <div class="settings-grid">
+                <div class="input-group">
+                    <label class="input-label" for="target-mode">Тип калибровки:</label>
+                    <select id="target-mode">
+                        <option value="frame" selected>Сплошная рамка</option>
+                        <option value="dots">4 угловых маркера</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="frame-size-input">Сторона базы, мм:</label>
+                    <input type="number" id="frame-size-input" class="input-text" value="100" min="20" max="1000" step="5">
+                </div>
+            </div>
+        </div>
 
-        <div id="save-panel" style="display: none; flex-direction: column; gap: 6px;">
+        <!-- Панель сохранения в стек -->
+        <div id="save-panel" class="panel-box" style="display: none;">
             <div class="input-group">
-                <label for="sample-name">Шифр образца / керна:</label>
+                <label class="input-label" for="sample-name">Шифр керна / образца:</label>
                 <input type="text" id="sample-name" class="input-text" placeholder="Керн-1">
             </div>
             <button class="btn btn-green" id="save-record-btn">📥 Записать в журнал смены</button>
         </div>
 
-        <div class="slider-group">
+        <!-- Порог контраста -->
+        <div class="panel-box">
             <div class="slider-row">
-                <span>Порог фона:</span>
-                <span id="thresh-val">Авто</span>
+                <span>Порог отсечения фона</span>
+                <span id="thresh-val" style="color: var(--accent-blue); font-weight: 600;">Авто</span>
             </div>
             <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
-    </div>
 
-    <div class="result-card">
-        <div>Определенная площадь разрыва:</div>
-        <div class="result-val" id="area-display">0.00 см²</div>
-        <div style="font-size: 11px; color: #aaa;" id="info-display">Наведите камеру или загрузите фото с рамкой</div>
-    </div>
+        <!-- Журнал смены -->
+        <div class="log-section">
+            <div class="log-header">
+                <span class="log-title">Стек замеров (<span id="record-count">0</span>)</span>
+                <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 11px;" id="clear-all-btn">Очистить</button>
+            </div>
+            
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>№</th>
+                            <th>Шифр</th>
+                            <th>S, см²</th>
+                            <th>База</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-tbody"></tbody>
+                </table>
+            </div>
 
-    <div class="log-section">
-        <div class="log-header">
-            <span>Журнал смены (<span id="record-count">0</span>)</span>
-            <button class="btn btn-outline" style="padding: 3px 8px; font-size: 11px;" id="clear-all-btn">Очистить всё</button>
-        </div>
-        
-        <div class="table-wrap">
-            <table id="log-table">
-                <thead>
-                    <tr>
-                        <th>№</th>
-                        <th>Шифр</th>
-                        <th>S, см²</th>
-                        <th>Время</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="log-tbody"></tbody>
-            </table>
-        </div>
-
-        <div class="export-btns">
-            <button class="btn btn-outline" id="export-csv-btn">📊 Excel / CSV</button>
-            <button class="btn btn-outline" id="export-zip-btn">📦 Фотопак (ZIP)</button>
+            <div class="export-btns">
+                <button class="btn btn-secondary" id="export-csv-btn">📊 Excel / CSV</button>
+                <button class="btn btn-secondary" id="export-zip-btn">📦 Фотопак (ZIP)</button>
+            </div>
         </div>
     </div>
 
@@ -218,10 +331,14 @@
         const mainBtnsRow = document.getElementById('main-btns-row');
         const fileInput = document.getElementById('file-input');
 
+        const targetMode = document.getElementById('target-mode');
+        const frameSizeInput = document.getElementById('frame-size-input');
+
         const savePanel = document.getElementById('save-panel');
         const saveRecordBtn = document.getElementById('save-record-btn');
         const sampleNameInput = document.getElementById('sample-name');
         const statusBadge = document.getElementById('status-badge');
+        const statusText = document.getElementById('status-text');
         const threshSlider = document.getElementById('thresh-slider');
         const threshVal = document.getElementById('thresh-val');
         const areaDisplay = document.getElementById('area-display');
@@ -237,8 +354,6 @@
         const exportZipBtn = document.getElementById('export-zip-btn');
         const clearAllBtn = document.getElementById('clear-all-btn');
 
-        const REAL_FRAME_SIDE_MM = 100.0;
-        const REAL_AREA_CM2 = (REAL_FRAME_SIDE_MM * REAL_FRAME_SIDE_MM) / 100.0;
         const WARP_SIZE = 500;
 
         let cvReady = false;
@@ -250,10 +365,15 @@
 
         let records = JSON.parse(localStorage.getItem('rock_test_records') || '[]');
 
+        function getRealAreaCm2() {
+            const sideMm = parseFloat(frameSizeInput.value) || 100.0;
+            return (sideMm * sideMm) / 100.0;
+        }
+
         function onOpenCvReady() {
             cvReady = true;
-            statusBadge.textContent = 'Готов к работе';
-            statusBadge.style.color = '#4cd964';
+            statusText.textContent = 'Готов к замеру';
+            statusBadge.style.color = '#00e676';
             captureBtn.disabled = false;
             galleryBtn.disabled = false;
         }
@@ -266,7 +386,7 @@
                 gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
                 const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
                 gyroLabel.textContent = `${Math.round(totalTilt)}°`;
-                gyroBubble.style.background = totalTilt <= 4 ? '#4cd964' : '#ff9500';
+                gyroBubble.style.background = totalTilt <= 4 ? '#00e676' : '#ffab00';
             });
         }
 
@@ -292,13 +412,21 @@
             if (isCaptured && lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
         };
 
+        frameSizeInput.oninput = () => {
+            if (isCaptured && lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+        };
+
+        targetMode.onchange = () => {
+            if (isCaptured && lastRawMat) processFrame(lastRawMat, null);
+        };
+
         function showResultMode() {
             isCaptured = true;
             video.style.display = 'none';
             outputCanvas.style.display = 'block';
             gyroBox.style.display = 'none';
             mainBtnsRow.style.display = 'none';
-            resetBtn.style.display = 'block';
+            resetBtn.style.display = 'flex';
             savePanel.style.display = 'flex';
             sampleNameInput.value = `Керн-${records.length + 1}`;
         }
@@ -311,15 +439,13 @@
             mainBtnsRow.style.display = 'grid';
             resetBtn.style.display = 'none';
             savePanel.style.display = 'none';
-            infoDisplay.textContent = 'Наведите камеру или загрузите фото с рамкой';
+            infoDisplay.textContent = 'Наведите видоискатель на калибровочную зону';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
         }
 
-        // 1. Захват с камеры
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
-
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = video.videoWidth;
             tempCanvas.height = video.videoHeight;
@@ -332,7 +458,6 @@
             processFrame(lastRawMat, null);
         });
 
-        // 2. Загрузка из галереи
         galleryBtn.addEventListener('click', () => {
             if (!cvReady) return;
             fileInput.click();
@@ -367,7 +492,7 @@
         saveRecordBtn.addEventListener('click', () => {
             const name = sampleNameInput.value.trim() || `Образец-${records.length + 1}`;
             const now = new Date();
-            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const dateStr = now.toISOString().slice(0, 10);
 
             const rawPhotoData = lastRawCroppedCanvas.toDataURL('image/jpeg', 0.85);
@@ -377,6 +502,8 @@
                 id: Date.now(),
                 name: name,
                 area: currentCalculatedArea,
+                baseMm: frameSizeInput.value,
+                mode: targetMode.value,
                 date: dateStr,
                 time: timeStr,
                 threshold: currentThreshApplied,
@@ -388,7 +515,7 @@
             saveRecordsToStorage();
             renderTable();
 
-            infoDisplay.innerHTML = `<span style="color:#4cd964;">✓ Записан в журнал: ${name}</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ Записан в журнал: ${name}</span>`;
             savePanel.style.display = 'none';
         });
 
@@ -396,7 +523,7 @@
             try {
                 localStorage.setItem('rock_test_records', JSON.stringify(records));
             } catch (e) {
-                alert('Память браузера переполнена! Экспортируйте фотопак (ZIP) и очистите журнал.');
+                alert('Память переполнена! Экспортируйте фотопак (ZIP) и очистите журнал.');
             }
         }
 
@@ -409,9 +536,9 @@
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><b>${rec.name}</b></td>
-                    <td style="color:#4cd964; font-weight:600;">${rec.area}</td>
-                    <td style="color:#888;">${rec.time}</td>
-                    <td><button class="btn btn-red" onclick="deleteRecord(${rec.id})">✕</button></td>
+                    <td style="color:var(--accent-green); font-weight:700;">${rec.area}</td>
+                    <td style="color:var(--text-muted);">${rec.baseMm} мм</td>
+                    <td><button class="btn-red" onclick="deleteRecord(${rec.id})">✕</button></td>
                 `;
                 logTbody.appendChild(tr);
             });
@@ -425,7 +552,7 @@
 
         clearAllBtn.addEventListener('click', () => {
             if (records.length === 0) return;
-            if (confirm('Очистить весь журнал смены? Убедитесь, что выгрузили Excel/ZIP.')) {
+            if (confirm('Очистить весь журнал смены?')) {
                 records = [];
                 saveRecordsToStorage();
                 renderTable();
@@ -434,12 +561,10 @@
 
         exportCsvBtn.addEventListener('click', () => {
             if (records.length === 0) return alert('Журнал пуст!');
-
-            let csv = '\uFEFF№;Шифр образца;Площадь (см²);Дата;Время;Порог отсечения\n';
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
             records.forEach((rec, idx) => {
-                csv += `${idx + 1};${rec.name};${rec.area};${rec.date};${rec.time};${rec.threshold}\n`;
+                csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
             });
-
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
@@ -449,7 +574,6 @@
 
         exportZipBtn.addEventListener('click', async () => {
             if (records.length === 0) return alert('Журнал пуст!');
-
             exportZipBtn.disabled = true;
             exportZipBtn.textContent = 'Сжатие...';
 
@@ -461,7 +585,6 @@
                 const prefix = `${idx + 1}_${rec.name}`;
                 const rawBase64 = rec.rawImg.replace(/^data:image\/jpeg;base64,/, "");
                 const maskBase64 = rec.maskImg.replace(/^data:image\/jpeg;base64,/, "");
-
                 folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
                 folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
             });
@@ -476,13 +599,87 @@
             exportZipBtn.textContent = '📦 Фотопак (ZIP)';
         });
 
-        function orderPoints(pts) {
-            let ptsArr = [];
-            for (let i = 0; i < 4; i++) ptsArr.push({ x: pts[i*2], y: pts[i*2+1] });
+        function orderPoints(ptsArr) {
             ptsArr.sort((a, b) => a.y - b.y);
             let topTwo = [ptsArr[0], ptsArr[1]].sort((a, b) => a.x - b.x);
             let botTwo = [ptsArr[2], ptsArr[3]].sort((a, b) => a.x - b.x);
             return [topTwo[0], topTwo[1], botTwo[1], botTwo[0]];
+        }
+
+        // 1. Поиск сплошной замкнутой рамки
+        function findFrameQuad(edged, minArea) {
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let bestQuad = null;
+            let maxArea = 0;
+
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let peri = cv.arcLength(cnt, true);
+                let approx = new cv.Mat();
+                cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
+
+                if (approx.rows === 4) {
+                    let a = cv.contourArea(approx);
+                    if (a > minArea && a > maxArea) {
+                        maxArea = a;
+                        let pts = [];
+                        for (let j = 0; j < 4; j++) {
+                            pts.push({ x: approx.data32S[j*2], y: approx.data32S[j*2+1] });
+                        }
+                        bestQuad = orderPoints(pts);
+                    }
+                }
+                approx.delete();
+                cnt.delete();
+            }
+            hierarchy.delete();
+            contours.delete();
+            return bestQuad;
+        }
+
+        // 2. Поиск 4 угловых маркеров-квадратиков
+        function findFourCornersQuad(grayMat) {
+            let bin = new cv.Mat();
+            cv.threshold(grayMat, bin, 80, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(bin, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let candidates = [];
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let a = cv.contourArea(cnt);
+                // Ищем небольшие компактные метки
+                if (a > 100 && a < 15000) {
+                    let rect = cv.boundingRect(cnt);
+                    let ratio = rect.width / rect.height;
+                    if (ratio > 0.6 && ratio < 1.4) {
+                        let m = cv.moments(cnt);
+                        if (m.m00 !== 0) {
+                            candidates.push({ x: m.m10 / m.m00, y: m.m01 / m.m00 });
+                        }
+                    }
+                }
+                cnt.delete();
+            }
+            bin.delete(); hierarchy.delete(); contours.delete();
+
+            if (candidates.length < 4) return null;
+
+            // Выбираем 4 наиболее удалённые по углам точки
+            candidates.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+            let topLeft = candidates[0];
+            let bottomRight = candidates[candidates.length - 1];
+
+            candidates.sort((a, b) => (a.x - a.y) - (b.x - b.y));
+            let bottomLeft = candidates[0];
+            let topRight = candidates[candidates.length - 1];
+
+            return orderPoints([topLeft, topRight, bottomRight, bottomLeft]);
         }
 
         function processFrame(srcMat, manualThreshold) {
@@ -491,49 +688,37 @@
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
             cv.Canny(blur, edged, 50, 150);
 
-            let contours = new cv.MatVector(), hierarchy = new cv.Mat();
-            cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+            let quad = null;
+            const mode = targetMode.value;
 
-            let squareContour = null, maxArea = 0;
-            for (let i = 0; i < contours.size(); i++) {
-                let cnt = contours.get(i);
-                let peri = cv.arcLength(cnt, true);
-                let approx = new cv.Mat();
-                cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-                if (approx.rows === 4) {
-                    let area = cv.contourArea(approx);
-                    if (area > 15000 && area > maxArea) {
-                        maxArea = area;
-                        if (squareContour) squareContour.delete();
-                        squareContour = approx.clone();
-                    }
-                }
-                approx.delete(); cnt.delete();
+            if (mode === 'frame') {
+                quad = findFrameQuad(edged, 12000);
+            } else {
+                quad = findFourCornersQuad(gray);
             }
-            gray.delete(); blur.delete(); edged.delete(); hierarchy.delete(); contours.delete();
 
-            if (!squareContour) {
+            gray.delete(); blur.delete(); edged.delete();
+
+            if (!quad) {
                 cv.imshow('output-canvas', srcMat);
-                infoDisplay.innerHTML = '<span style="color:#ff453a;">Рамка не найдена на фото!</span>';
-                areaDisplay.textContent = '0.00 см²';
+                infoDisplay.innerHTML = `<span style="color:var(--accent-red);">${mode === 'frame' ? 'Рамка не найдена!' : '4 маркера не распознаны!'}</span>`;
+                areaDisplay.textContent = '0.00';
                 return;
             }
 
-            const ordered = orderPoints(squareContour.data32S);
-            squareContour.delete();
-
             let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                ordered[0].x, ordered[0].y,
-                ordered[1].x, ordered[1].y,
-                ordered[2].x, ordered[2].y,
-                ordered[3].x, ordered[3].y
+                quad[0].x, quad[0].y,
+                quad[1].x, quad[1].y,
+                quad[2].x, quad[2].y,
+                quad[3].x, quad[3].y
             ]);
             let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, WARP_SIZE, 0, WARP_SIZE, WARP_SIZE, 0, WARP_SIZE]);
             let M = cv.getPerspectiveTransform(srcTri, dstTri);
             let warped = new cv.Mat();
             cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
 
-            let pad = 25;
+            // Отступ внутрь: для рамки срезаем саму линию (25px), для маркеров отступ минимален (10px)
+            let pad = mode === 'frame' ? 25 : 10;
             let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
             let cropped = warped.roi(roiRect);
 
@@ -573,7 +758,8 @@
             }
 
             let stonePixels = cv.countNonZero(solidMask);
-            currentCalculatedArea = ((stonePixels / (WARP_SIZE * WARP_SIZE)) * REAL_AREA_CM2).toFixed(2);
+            const realAreaCm2 = getRealAreaCm2();
+            currentCalculatedArea = ((stonePixels / (WARP_SIZE * WARP_SIZE)) * realAreaCm2).toFixed(2);
 
             for (let r = 0; r < cropped.rows; r++) {
                 for (let c = 0; c < cropped.cols; c++) {
@@ -585,8 +771,8 @@
             }
 
             cv.imshow('output-canvas', warped);
-            areaDisplay.textContent = currentCalculatedArea + ' см²';
-            infoDisplay.innerHTML = '<span style="color:#4cd964;">✓ Замер завершен, нажмите записать</span>';
+            areaDisplay.textContent = currentCalculatedArea;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ База ${frameSizeInput.value} мм | S = ${currentCalculatedArea} см²</span>`;
 
             srcTri.delete(); dstTri.delete(); M.delete(); warped.delete();
             cropped.delete(); cropGray.delete(); cropBlur.delete();
