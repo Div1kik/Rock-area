@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Измеритель площади скола</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
+        body { background: #121212; color: #fff; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+        h1 { font-size: 1.1rem; margin-bottom: 8px; font-weight: 500; }
+        
+        .view-container {
+            position: relative;
+            width: 320px;
+            height: 320px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+        
+        video, canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Направляющая масштабная рамка */
+        .overlay-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 220px;
+            height: 220px;
+            transform: translate(-50%, -50%);
+            border: 2px dashed #00ff66;
+            pointer-events: none;
+        }
+        .overlay-label {
+            position: absolute;
+            bottom: -22px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 11px;
+            color: #00ff66;
+        }
+
+        .controls {
+            width: 320px;
+            margin-top: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 14px;
+            font-size: 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn:active { background: #0056b3; }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        .result-card {
+            margin-top: 15px;
+            width: 320px;
+            background: #1e1e1e;
+            padding: 14px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .result-val {
+            font-size: 1.8rem;
+            color: #4cd964;
+            font-weight: 700;
+            margin: 6px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Экспресс-замер площади скола</h1>
+
+    <div class="view-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="canvas" style="display: none;"></canvas>
+        <div class="overlay-box" id="overlay">
+            <span class="overlay-label">Рамка 100×100 мм</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="capture-btn">Измерить площадь</button>
+        
+        <div class="slider-group">
+            <label for="thresh-slider">Порог отсечения фона: <span id="thresh-val">120</span></label>
+            <input type="range" id="thresh-slider" min="30" max="220" value="120">
+        </div>
+    </div>
+
+    <div class="result-card">
+        <div>Определенная площадь разрыва:</div>
+        <div class="result-val" id="area-display">0.00 см²</div>
+        <div style="font-size: 12px; color: #888;" id="info-display">Совместите рамку и нажмите «Измерить»</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('capture-btn');
+        const threshSlider = document.getElementById('thresh-slider');
+        const threshVal = document.getElementById('thresh-val');
+        const areaDisplay = document.getElementById('area-display');
+        const infoDisplay = document.getElementById('info-display');
+
+        // Реальный физический размер рамки на бумаге (в мм)
+        const REAL_FRAME_SIDE_MM = 100.0;
+        const REAL_FRAME_AREA_CM2 = (REAL_FRAME_SIDE_MM * REAL_FRAME_SIDE_MM) / 100.0; // 100 см²
+
+        // Запуск камеры смартфона (основной тыльной)
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                alert('Ошибка доступа к камере: ' + err.name);
+            }
+        }
+
+        threshSlider.oninput = () => {
+            threshVal.textContent = threshSlider.value;
+            if (canvas.style.display !== 'none') processImage();
+        };
+
+        let lastCapturedFrame = null;
+
+        captureBtn.addEventListener('click', () => {
+            if (canvas.style.display === 'none') {
+                // Делаем стоп-кадр
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                lastCapturedFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                video.style.display = 'none';
+                canvas.style.display = 'block';
+                captureBtn.textContent = 'Сбросить / Новый замер';
+                processImage();
+            } else {
+                // Возврат в режим видоискателя
+                canvas.style.display = 'none';
+                video.style.display = 'block';
+                captureBtn.textContent = 'Измерить площадь';
+                infoDisplay.textContent = 'Совместите рамку и нажмите «Измерить»';
+            }
+        });
+
+        function processImage() {
+            if (!lastCapturedFrame) return;
+
+            const ctx = canvas.getContext('2d');
+            ctx.putImageData(lastCapturedFrame, 0, 0);
+
+            // Определяем координаты центральной зоны (соответствующей рамке на экране)
+            const side = Math.min(canvas.width, canvas.height) * (220 / 320);
+            const startX = Math.floor((canvas.width - side) / 2);
+            const startY = Math.floor((canvas.height - side) / 2);
+
+            const imgData = ctx.getImageData(startX, startY, side, side);
+            const data = imgData.data;
+            const threshold = parseInt(threshSlider.value, 10);
+
+            let stonePixels = 0;
+            const totalFramePixels = side * side;
+
+            // Бинаризация: белый фон отсекается, темный скол подсвечивается зеленым
+            for (let i = 0; i < data.length; i += 4) {
+                // Яркость пикселя по формуле серого
+                const brightness = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+
+                if (brightness < threshold) {
+                    stonePixels++;
+                    // Подкрашиваем найденный контур камня ярко-зелёным
+                    data[i] = 0;
+                    data[i + 1] = 255;
+                    data[i + 2] = 100;
+                }
+            }
+
+            ctx.putImageData(imgData, startX, startY);
+
+            // Расчет площади: отношение пикселей камня ко всем пикселям рамки
+            const areaCm2 = (stonePixels / totalFramePixels) * REAL_FRAME_AREA_CM2;
+            areaDisplay.textContent = areaCm2.toFixed(2) + ' см²';
+            infoDisplay.textContent = `Пикселей камня: ${stonePixels.toLocaleString()}`;
+        }
+
+        initCamera();
+    </script>
+</body>
+</html>
