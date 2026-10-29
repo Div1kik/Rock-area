@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Авто-захват рамки и площади</title>
-    <!-- Подключаем оптимизированный OpenCV.js -->
+    <title>Авто-захват площади скола</title>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -106,10 +105,10 @@
         
         <div class="slider-group">
             <div class="slider-row">
-                <span>Порог отсечения камня:</span>
-                <span id="thresh-val">110</span>
+                <span>Порог отсечения фона:</span>
+                <span id="thresh-val">Авто</span>
             </div>
-            <input type="range" id="thresh-slider" min="30" max="200" value="110">
+            <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
     </div>
 
@@ -145,27 +144,37 @@
         }
 
         async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
-                    audio: false
-                });
-                video.srcObject = stream;
-            } catch (err) {
-                alert('Ошибка камеры: ' + err.name);
+            const configs = [
+                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
+                { video: { facingMode: "environment" }, audio: false },
+                { video: true, audio: false }
+            ];
+
+            for (let config of configs) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(config);
+                    video.srcObject = stream;
+                    await video.play();
+                    return;
+                } catch (err) {
+                    console.warn("Попытка подключения камеры не удалась:", err);
+                }
             }
+
+            alert('Не удалось запустить камеру. Проверьте, закрыта ли стандартная камера и выключен ли фонарик.');
         }
 
         threshSlider.oninput = () => {
             threshVal.textContent = threshSlider.value;
-            if (isCaptured && lastRawMat) processFrame(lastRawMat);
+            if (isCaptured && lastRawMat) {
+                processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+            }
         };
 
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
 
             if (!isCaptured) {
-                // Захватываем текущий кадр с камеры
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = video.videoWidth;
                 tempCanvas.height = video.videoHeight;
@@ -180,17 +189,18 @@
                 captureBtn.textContent = 'Новый замер';
                 isCaptured = true;
 
-                processFrame(lastRawMat);
+                // Передаем null, чтобы при первом захвате порог рассчитался автоматически по Оцу
+                processFrame(lastRawMat, null);
             } else {
                 outputCanvas.style.display = 'none';
                 video.style.display = 'block';
                 captureBtn.textContent = 'Измерить (Авто-захват)';
                 infoDisplay.textContent = 'Наведите камеру на квадратную рамку';
+                threshVal.textContent = 'Авто';
                 isCaptured = false;
             }
         });
 
-        // Сортировка углов четырёхугольника: top-left, top-right, bottom-right, bottom-left
         function orderPoints(pts) {
             let ptsArr = [];
             for (let i = 0; i < 4; i++) ptsArr.push({ x: pts[i*2], y: pts[i*2+1] });
@@ -202,17 +212,16 @@
             return [topTwo[0], topTwo[1], botTwo[1], botTwo[0]];
         }
 
-        function processFrame(srcMat) {
+        function processFrame(srcMat, manualThreshold) {
             let gray = new cv.Mat();
             let blur = new cv.Mat();
             let edged = new cv.Mat();
 
-            // 1. Предварительная обработка для поиска границы рамки
+            // 1. Поиск рамки
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
             cv.Canny(blur, edged, 50, 150);
 
-            // 2. Поиск внешних контуров
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
@@ -226,7 +235,6 @@
                 let approx = new cv.Mat();
                 cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
 
-                // Ищем замкнутый 4-угольник достаточного размера
                 if (approx.rows === 4) {
                     let area = cv.contourArea(approx);
                     if (area > 15000 && area > maxArea) {
@@ -242,14 +250,13 @@
             gray.delete(); blur.delete(); edged.delete(); hierarchy.delete(); contours.delete();
 
             if (!squareContour) {
-                // Если рамка не распозналась — показываем кадр как есть
                 cv.imshow('output-canvas', srcMat);
                 infoDisplay.innerHTML = '<span style="color:#ff453a;">Рамка не найдена! Сделайте линию ярче и держите камеру ровнее.</span>';
                 areaDisplay.textContent = '0.00 см²';
                 return;
             }
 
-            // 3. Выпрямление перспективы (Warp Perspective)
+            // 2. Выпрямление перспективы
             const ordered = orderPoints(squareContour.data32S);
             squareContour.delete();
 
@@ -260,7 +267,6 @@
                 ordered[3].x, ordered[3].y
             ]);
 
-            // Проецируем в идеальный квадрат 500x500 px
             let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
                 0, 0,
                 WARP_SIZE, 0,
@@ -272,8 +278,7 @@
             let warped = new cv.Mat();
             cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
 
-            // 4. Поиск камня внутри выпрямленного квадрата
-            // Отступаем по 25 px внутрь от краёв, чтобы срезать саму нарисованную чёрную рамку
+            // 3. Выделение зоны внутри рамки (срезаем саму нарисованную линию)
             let pad = 25;
             let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
             let cropped = warped.roi(roiRect);
@@ -281,15 +286,35 @@
             let cropGray = new cv.Mat();
             cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
 
-            let threshValUser = parseInt(threshSlider.value, 10);
+            // Сглаживаем шум перед порогом
+            let cropBlur = new cv.Mat();
+            cv.GaussianBlur(cropGray, cropBlur, new cv.Size(3, 3), 0);
+
             let mask = new cv.Mat();
-            // Бинаризация: тёмные пиксели камня становятся белыми в маске
-            cv.threshold(cropGray, mask, threshValUser, 255, cv.THRESH_BINARY_INV);
+            let appliedThresh = manualThreshold;
+
+            if (appliedThresh === null) {
+                // Автоматический порог по Оцу
+                appliedThresh = Math.round(cv.threshold(cropBlur, mask, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU));
+                threshSlider.value = appliedThresh;
+                threshVal.textContent = appliedThresh + ' (Авто)';
+            } else {
+                cv.threshold(cropBlur, mask, appliedThresh, 255, cv.THRESH_BINARY_INV);
+                threshVal.textContent = appliedThresh;
+            }
+
+            // 4. Морфологическая очистка
+            let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+            // Удаляем мелкие песчинки и пыль вокруг образца
+            cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
+            // Затягиваем блики и кристаллы внутри образца
+            cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
+            kernel.delete();
 
             let stonePixels = cv.countNonZero(mask);
-            let totalFramePixels = WARP_SIZE * WARP_SIZE; // Полная эталонная площадь квадрата
+            let totalFramePixels = WARP_SIZE * WARP_SIZE;
 
-            // Подкрашиваем найденный камень зелёным цветом прямо на выпрямленном снимке
+            // 5. Подкрашиваем найденный контур камня ярко-зелёным
             for (let r = 0; r < cropped.rows; r++) {
                 for (let c = 0; c < cropped.cols; c++) {
                     if (mask.ucharPtr(r, c)[0] > 0) {
@@ -301,43 +326,17 @@
                 }
             }
 
-            // Выводим результат на экран
             cv.imshow('output-canvas', warped);
 
             const areaCm2 = (stonePixels / totalFramePixels) * REAL_AREA_CM2;
             areaDisplay.textContent = areaCm2.toFixed(2) + ' см²';
-            infoDisplay.innerHTML = '<span style="color:#4cd964;">✓ Рамка захвачена и перспектива выровнена!</span>';
+            infoDisplay.innerHTML = '<span style="color:#4cd964;">✓ Рамка захвачена, мусор отфильтрован</span>';
 
             srcTri.delete(); dstTri.delete(); M.delete(); warped.delete();
-            cropped.delete(); cropGray.delete(); mask.delete();
-        }
-                async function initCamera() {
-            const configs = [
-                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
-                { video: { facingMode: "environment" }, audio: false },
-                { video: true, audio: false }
-            ];
-
-            for (let config of configs) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia(config);
-                    video.srcObject = stream;
-                    await video.play(); // Запускаем воспроизведение видеопотока
-                    return;
-                } catch (err) {
-                    console.warn("Попытка не удалась:", err);
-                }
-            }
-
-            alert('Не удалось запустить камеру. Проверьте, закрыта ли стандартная камера и выключен ли фонарик.');
+            cropped.delete(); cropGray.delete(); cropBlur.delete(); mask.delete();
         }
 
-        // ОБЯЗАТЕЛЬНО: вызываем функцию запуска камеры
         initCamera();
     </script>
 </body>
 </html>
-
-</html>
-
-            
