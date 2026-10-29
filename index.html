@@ -861,7 +861,32 @@
         }
 
         renderTable();
+
+function startAppCamera() {
+    // Если запущено внутри Cordova, запрашиваем системное разрешение Android
+    if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
+        const permissions = cordova.plugins.permissions;
+        permissions.requestPermission(permissions.CAMERA, function(status) {
+            if (status.hasPermission) {
+                initCamera();
+            } else {
+                alert('Для работы прибора требуется доступ к камере в настройках приложения.');
+            }
+        }, function() {
+            initCamera();
+        });
+    } else {
+        // Обычный браузер / PWA
         initCamera();
+    }
+}
+
+if (window.cordova) {
+    document.addEventListener('deviceready', startAppCamera, false);
+} else {
+    document.addEventListener('DOMContentLoaded', startAppCamera);
+}
+
     </script>
 </body>
 </html>
