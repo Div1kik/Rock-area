@@ -26,30 +26,38 @@ jobs:
 
       - name: Build Cordova Project
         run: |
-          # Автоматически принимаем лицензии для встроенного Android SDK
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-          # Создаем каркас приложения
           cordova create app com.div1kik.rockarea "RockArea"
           cd app
           rm -rf www/*
 
-          # Копируем веб-файл
           cp ../index.html www/index.html
           mkdir -p www/js
 
-          # Скачиваем библиотеки внутрь пакета
           curl -sL https://docs.opencv.org/4.8.0/opencv.js -o www/js/opencv.js
           curl -sL https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js -o www/js/jszip.min.js
 
-          # Локализуем пути в index.html
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-          # Подключаем Android платформу
-          cordova platform add android
+          # Подключаем плагин для аппаратного запроса разрешений камеры Android
+          cordova plugin add cordova-plugin-android-permissions
+          cordova plugin add cordova-plugin-camera
 
-          # Запускаем компиляцию
+          # Добавляем разрешения на камеру в config.xml
+          sed -i '/<\/widget>/i \
+          <platform name="android">\
+              <config-file target="AndroidManifest.xml" parent="/*">\
+                  <uses-permission android:name="android.permission.CAMERA" />\
+                  <uses-permission android:name="android.permission.RECORD_AUDIO" />\
+                  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\
+                  <uses-feature android:name="android.hardware.camera" android:required="true" />\
+                  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />\
+              </config-file>\
+          </platform>' config.xml
+
+          cordova platform add android
           cordova build android --debug
 
       - name: Upload APK Artifact
