@@ -41,18 +41,20 @@ jobs:
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-          # Официальные плагины доступа к оборудованию и камере
+          # Плагины камеры и файловой системы
           cordova plugin add cordova-plugin-camera
           cordova plugin add cordova-plugin-android-permissions
+          cordova plugin add cordova-plugin-file
 
           cordova platform add android
 
-          # Внедряем системное разрешение на камеру напрямую в сгенерированный манифест
           MANIFEST="platforms/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             sed -i '/<application/i <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
             sed -i '/<application/i <uses-feature android:name="android.hardware.camera" android:required="true" />' "$MANIFEST"
             sed -i '/<application/i <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' "$MANIFEST"
+            sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' "$MANIFEST"
+            sed -i '/<application/i <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
           fi
 
           cordova build android --debug
