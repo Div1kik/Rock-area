@@ -148,6 +148,8 @@
         .info-msg { font-size: 12px; color: var(--text-muted); }
 
         .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        
+        /* Единый базовый стиль кнопок и синхронизированная плавная анимация */
         .btn {
             background: var(--accent-blue);
             color: #fff;
@@ -161,14 +163,28 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            transition: all 0.15s ease;
+            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
             box-shadow: 0 4px 12px rgba(41, 121, 255, 0.25);
+            user-select: none;
         }
         .btn:active:not(:disabled) { transform: scale(0.97); }
-        .btn:disabled { background: #1f2229; color: #4e5566; box-shadow: none; cursor: not-allowed; }
-        .btn-secondary { background: #1c1f26; border: 1px solid var(--card-border); color: #fff; box-shadow: none; }
+        .btn:disabled { background: #1f2229; color: #4e5566; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+
+        .btn-secondary {
+            background: #1c1f26;
+            border: 1px solid var(--card-border);
+            color: #fff;
+            box-shadow: none;
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .btn-secondary:active:not(:disabled) {
+            background: #252a34;
+            transform: scale(0.97);
+        }
+
         .btn-green { background: var(--accent-green); color: #000; box-shadow: 0 4px 14px rgba(0, 230, 118, 0.3); }
-        .btn-red { background: rgba(255, 61, 113, 0.15); border: 1px solid rgba(255, 61, 113, 0.3); color: var(--accent-red); padding: 6px 10px; font-size: 12px; border-radius: 8px; }
+        .btn-red { background: rgba(255, 61, 113, 0.15); border: 1px solid rgba(255, 61, 113, 0.3); color: var(--accent-red); padding: 6px 10px; font-size: 12px; border-radius: 8px; transition: transform 0.15s ease; }
+        .btn-red:active { transform: scale(0.92); }
 
         .panel-box {
             background: var(--card-bg);
@@ -380,6 +396,7 @@
         let lastRawCroppedCanvas = null;
         let currentCalculatedArea = "0.00";
         let currentThreshApplied = 110;
+        let mediaStream = null;
         let videoTrack = null;
         let focusTimer = null;
 
@@ -410,7 +427,24 @@
             });
         }
 
+        // Корректная остановка камеры при сворачивании (устраняет жужжание фокуса и зависание)
+        function stopCamera() {
+            if (focusTimer) {
+                clearTimeout(focusTimer);
+                focusTimer = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                videoTrack = null;
+            }
+            video.srcObject = null;
+        }
+
         async function initCamera() {
+            stopCamera();
+            if (isCaptured) return;
+
             const configs = [
                 {
                     video: {
@@ -428,6 +462,7 @@
             for (let config of configs) {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia(config);
+                    mediaStream = stream;
                     video.srcObject = stream;
                     await video.play();
                     videoTrack = stream.getVideoTracks()[0];
@@ -449,6 +484,7 @@
             } catch (e) {}
         }
 
+        // Tap-to-Focus
         viewWrapper.addEventListener('click', async (e) => {
             if (isCaptured || !videoTrack) return;
 
@@ -461,21 +497,36 @@
             focusIndicator.style.opacity = '1';
             focusIndicator.style.transform = 'translate(-50%, -50%) scale(1)';
 
-            clearTimeout(focusTimer);
+            if (focusTimer) clearTimeout(focusTimer);
             focusTimer = setTimeout(() => {
                 focusIndicator.style.opacity = '0';
                 focusIndicator.style.transform = 'translate(-50%, -50%) scale(0.8)';
-            }, 1200);
+            }, 1000);
 
             try {
                 const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
                 if (caps.focusMode && caps.focusMode.includes('continuous')) {
                     await videoTrack.applyConstraints({ advanced: [{ focusMode: 'auto' }] });
                     setTimeout(async () => {
-                        await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-                    }, 400);
+                        if (videoTrack) {
+                            await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                        }
+                    }, 350);
                 }
             } catch (err) {}
+        });
+
+        // Слушатели сворачивания/разворачивания приложения (Background / Foreground)
+        document.addEventListener('pause', stopCamera, false);
+        document.addEventListener('resume', () => {
+            if (!isCaptured) initCamera();
+        }, false);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopCamera();
+            } else if (!isCaptured) {
+                initCamera();
+            }
         });
 
         threshSlider.oninput = () => {
@@ -500,6 +551,7 @@
             resetBtn.style.display = 'flex';
             savePanel.style.display = 'flex';
             sampleNameInput.value = `Керн-${records.length + 1}`;
+            stopCamera();
         }
 
         function resetToLiveMode() {
@@ -513,14 +565,14 @@
             infoDisplay.textContent = 'Нажмите на экран для точной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            applyContinuousFocus();
+            initCamera();
         }
 
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = video.videoWidth;
-            tempCanvas.height = video.videoHeight;
+            tempCanvas.width = video.videoWidth || 640;
+            tempCanvas.height = video.videoHeight || 640;
             tempCanvas.getContext('2d').drawImage(video, 0, 0);
 
             if (lastRawMat) lastRawMat.delete();
@@ -631,38 +683,30 @@
             }
         });
 
-        // -------------------------------------------------------------
-        // УНИВЕРСАЛЬНЫЙ БЛОК СОХРАНЕНИЯ ФАЙЛОВ (Cordova + Web)
-        // -------------------------------------------------------------
-        function saveBlobFile(blob, fileName) {
-            if (window.cordova && cordova.file) {
-                const targetDir = cordova.file.externalRootDirectory ? (cordova.file.externalRootDirectory + 'Download/') : cordova.file.dataDirectory;
-                
-                window.resolveLocalFileSystemURL(targetDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(fileWriter) {
-                            fileWriter.onwriteend = function() {
-                                alert('✓ Файл сохранён в папку "Загрузки" (Download):\n' + fileName);
-                            };
-                            fileWriter.onerror = function(e) {
-                                alert('Ошибка записи: ' + e.toString());
-                            };
-                            fileWriter.write(blob);
-                        });
-                    }, function(err) {
-                        alert('Ошибка создания файла: ' + JSON.stringify(err));
-                    });
-                }, function(err) {
-                    window.requestFileSystem(LocalFileSystem.PERSISTENT, 0, function(fs) {
-                        fs.root.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                            fileEntry.createWriter(function(fileWriter) {
-                                fileWriter.write(blob);
-                                alert('Файл сохранён в памяти приложения:\n' + fileName);
-                            });
-                        });
-                    });
-                });
+        // НАДЕЖНЫЙ МЕХАНИЗМ СОХРАНЕНИЯ / ШАРИНГА ДЛЯ ANDROID И БРАУЗЕРА
+        function exportFileUniversal(dataUriOrBlob, fileName, mimeType) {
+            // Если мы внутри установленного APK (Cordova)
+            if (window.plugins && window.plugins.socialsharing) {
+                if (typeof dataUriOrBlob === 'string' && dataUriOrBlob.startsWith('data:')) {
+                    window.plugins.socialsharing.shareWithOptions({
+                        message: `Отчёт: ${fileName}`,
+                        subject: fileName,
+                        files: [dataUriOrBlob]
+                    }, () => {}, (err) => alert('Ошибка экспорта: ' + err));
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = function() {
+                        window.plugins.socialsharing.shareWithOptions({
+                            message: `Архив: ${fileName}`,
+                            subject: fileName,
+                            files: [reader.result]
+                        }, () => {}, (err) => alert('Ошибка экспорта: ' + err));
+                    };
+                    reader.readAsDataURL(dataUriOrBlob);
+                }
             } else {
+                // Если запущен в стандартном браузере
+                const blob = (typeof dataUriOrBlob === 'string') ? new Blob([dataUriOrBlob], { type: mimeType }) : dataUriOrBlob;
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
                 link.download = fileName;
@@ -679,15 +723,15 @@
             records.forEach((rec, idx) => {
                 csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
             });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            saveBlobFile(blob, `Журнал_испытаний_${new Date().toISOString().slice(0,10)}.csv`);
+            const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0,10)}.csv`;
+            const base64Data = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csv)));
+            exportFileUniversal(base64Data, fileName, 'text/csv');
         });
 
         // 2. Пакетная выгрузка ZIP-архива
         exportZipBtn.addEventListener('click', async () => {
             if (records.length === 0) return alert('Журнал пуст!');
             exportZipBtn.disabled = true;
-            exportZipBtn.textContent = 'Сжатие...';
 
             try {
                 const zip = new JSZip();
@@ -703,12 +747,12 @@
                 });
 
                 const content = await zip.generateAsync({ type: "blob" });
-                saveBlobFile(content, `Фотоархив_сколов_${new Date().toISOString().slice(0,10)}.zip`);
+                const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0,10)}.zip`;
+                exportFileUniversal(content, fileName, 'application/zip');
             } catch (err) {
-                alert('Ошибка упаковки архива: ' + err);
+                alert('Ошибка создания архива: ' + err);
             } finally {
                 exportZipBtn.disabled = false;
-                exportZipBtn.textContent = '📦 Фотопак (ZIP)';
             }
         });
 
