@@ -21,40 +21,36 @@ jobs:
         with:
           node-version: 20
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools platforms;android-33 build-tools;33.0.2'
-
-      - name: Accept Android Licenses
-        run: yes | sdkmanager --licenses || true
-
       - name: Install Cordova
         run: npm install -g cordova
 
-      - name: Prepare Offline Assets and Build Project
+      - name: Build Cordova Project
         run: |
+          # Автоматически принимаем лицензии для встроенного Android SDK
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+          # Создаем каркас приложения
           cordova create app com.div1kik.rockarea "RockArea"
           cd app
           rm -rf www/*
-          
-          # Копируем только файлы приложения (без .git и workflows)
+
+          # Копируем веб-файл
           cp ../index.html www/index.html
           mkdir -p www/js
-          
-          # Скачиваем библиотеки в локальную папку
+
+          # Скачиваем библиотеки внутрь пакета
           curl -sL https://docs.opencv.org/4.8.0/opencv.js -o www/js/opencv.js
           curl -sL https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js -o www/js/jszip.min.js
-          
-          # Подменяем пути скриптов на локальные
+
+          # Локализуем пути в index.html
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
-          
-          # Настраиваем платформу с точной версией под SDK 33
-          cordova platform add android@12.0.1
-          
-          # Запуск сборки APK
-          cordova build android --debug -- --gradleArg=--no-daemon
+
+          # Подключаем Android платформу
+          cordova platform add android
+
+          # Запускаем компиляцию
+          cordova build android --debug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
