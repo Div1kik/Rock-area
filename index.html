@@ -972,14 +972,39 @@
         });
 
         // =============================================================
-        // СОХРАНЕНИЕ В ПАМЯТЬ СМАРТФОНА
+        // НАСТОЯЩЕЕ СОХРАНЕНИЕ В ПАПКУ "ЗАГРУЗКИ" (ANDROID MEDIASTORE)
         // =============================================================
-        function saveBinaryBlobToDevice(blobData, fileName) {
-            // Метод 1: Прямой запуск загрузки через нативный DownloadListener Android WebView
+        function saveBase64ToDownloads(base64Payload, fileName, mimeType) {
+            // Очищаем префикс Data URL, если он есть
+            const cleanBase64 = base64Payload.replace(/^data:[^;]+;base64,/, "");
+
+            // 1. Для Android Cordova APK: вызов официального MediaStore API
+            if (window.cordova && cordova.plugins && cordova.plugins.mediastore) {
+                cordova.plugins.mediastore.saveToDownload(
+                    cleanBase64,
+                    fileName,
+                    mimeType,
+                    function() {
+                        alert(`✓ Файл успешно сохранён на устройство!\n\nПапка: Загрузки (Download)\nИмя: ${fileName}`);
+                    },
+                    function(err) {
+                        alert('Ошибка сохранения в MediaStore: ' + JSON.stringify(err));
+                    }
+                );
+                return;
+            }
+
+            // 2. Для тестирования в браузере на компьютере
             try {
-                const blobUrl = URL.createObjectURL(blobData);
+                const byteCharacters = atob(cleanBase64);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: mimeType });
+                const blobUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.style.display = 'none';
                 a.href = blobUrl;
                 a.download = fileName;
                 document.body.appendChild(a);
@@ -987,26 +1012,13 @@
                 setTimeout(() => {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(blobUrl);
-                }, 1500);
-            } catch (e) {}
-
-            // Метод 2: Параллельная прямая запись в общедоступный каталог устройства
-            if (window.cordova && cordova.file) {
-                const safePath = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(safePath, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                alert(`✓ Файл сохранён на устройство:\n${fileName}`);
-                            };
-                            writer.write(blobData);
-                        });
-                    });
-                }, function() {});
+                }, 1000);
+            } catch (e) {
+                alert('Ошибка скачивания: ' + e.message);
             }
         }
 
-        // 1. Выгрузка CSV
+        // 1. Выгрузка CSV таблицы
         exportCsvBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1014,16 +1026,17 @@
             }
             try {
                 const csvContent = generateCsvString();
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+                // Кодируем CSV в Base64 с полной поддержкой кириллицы UTF-8
+                const base64Csv = btoa(unescape(encodeURIComponent(csvContent)));
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
                 
-                saveBinaryBlobToDevice(blob, fileName);
+                saveBase64ToDownloads(base64Csv, fileName, 'text/csv');
             } catch (err) {
                 alert('Ошибка CSV: ' + err.message);
             }
         };
 
-        // 2. Выгрузка ZIP архива
+        // 2. Выгрузка ZIP архива с фото
         exportZipBtn.onclick = async function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1050,10 +1063,11 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                const zipBlob = await zip.generateAsync({ type: "blob" });
+                // Генерируем ZIP сразу в строку Base64
+                const zipBase64 = await zip.generateAsync({ type: "base64" });
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveBinaryBlobToDevice(zipBlob, fileName);
+                saveBase64ToDownloads(zipBase64, fileName, 'application/zip');
             } catch (err) {
                 alert('Ошибка архиватора: ' + err.message);
             } finally {
@@ -1062,7 +1076,7 @@
             }
         };
 
-        // 3. Отдельная кнопка «Поделиться отчётом (CSV)»
+        // 3. Отдельная кнопка «Поделиться отчётом (CSV)» (через системную шторку)
         shareReportBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1279,17 +1293,15 @@
 
         renderTable();
 
-        function startAppWithPermissions() {
+        function startAppCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                const permissionsList = [
-                    permissions.CAMERA,
-                    permissions.WRITE_EXTERNAL_STORAGE,
-                    permissions.READ_EXTERNAL_STORAGE
-                ];
-
-                permissions.requestPermissions(permissionsList, function(status) {
-                    initCamera();
+                permissions.requestPermission(permissions.CAMERA, function(status) {
+                    if (status.hasPermission) {
+                        initCamera();
+                    } else {
+                        alert('Для работы планиметра требуется доступ к камере.');
+                    }
                 }, function() {
                     initCamera();
                 });
@@ -1299,9 +1311,9 @@
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', startAppWithPermissions, false);
+            document.addEventListener('deviceready', startAppCamera, false);
         } else {
-            document.addEventListener('DOMContentLoaded', startAppWithPermissions);
+            document.addEventListener('DOMContentLoaded', startAppCamera);
         }
     </script>
 </body>
