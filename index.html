@@ -510,6 +510,7 @@
                 </div>
             </div>
 
+            <!-- Только нужные кнопки, без лишних -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <button class="btn btn-green" id="export-excel-period-btn">
                     <span>💾</span> Скачать CSV
@@ -1288,11 +1289,11 @@
             }
         };
 
-        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В ПАПКУ "DOCUMENTS" ВО ВНУТРЕННЕМ ХРАНИЛИЩЕ
+        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В ПАПКУ DOCUMENTS С ОРИГИНАЛЬНЫМ BLOB
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
-
+                
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
@@ -1340,9 +1341,8 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
+            
             const blob = new Blob([byteArray], { type: 'image/jpeg' });
-            const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
-
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
@@ -1376,7 +1376,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы за период (С ИСПОЛЬЗОВАНИЕМ BLOB КАК ПРОСИЛИ)
+        // Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1387,13 +1387,13 @@
             const fromStr = filterDateFrom.value || 'все';
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
+            
             const csvContent = generateCsvStringForArray(filtered);
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив за период (С ИСПОЛЬЗОВАНИЕМ BLOB КАК ПРОСИЛИ)
+        // Пакетный ZIP-архив за период
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1434,7 +1434,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола (С ИСПОЛЬЗОВАНИЕМ BLOB КАК ПРОСИЛИ)
+        // Формирование HTML-фотопротокола
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
