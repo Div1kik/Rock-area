@@ -3,53 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Лабораторный планиметр керна</title>
+    <title>Планиметр керна</title>
     <script src="cordova.js"></script>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
-            --bg-main: #0c0d11;
-            --card-bg: rgba(26, 29, 36, 0.85);
-            --card-border: rgba(255, 255, 255, 0.08);
-            --accent-green: #00e676;
-            --accent-blue: #2979ff;
-            --accent-red: #ff3d71;
-            --text-main: #ffffff;
-            --text-muted: #8e95a5;
+            --bg-base: #0b0f19;
+            --bg-surface: #131c2e;
+            --bg-card: rgba(22, 33, 54, 0.88);
+            --card-border: rgba(148, 163, 184, 0.12);
+            --accent-mint: #10b981;
+            --accent-mint-glow: rgba(16, 185, 129, 0.25);
+            --accent-cyan: #06b6d4;
+            --accent-blue: #3b82f6;
+            --accent-red: #ef4444;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
         body {
-            background: var(--bg-main);
-            color: var(--text-main);
+            background: radial-gradient(circle at top, #131e33 0%, var(--bg-base) 100%);
+            color: var(--text-primary);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 16px 14px 40px;
+            padding: 16px 14px 44px;
             min-height: 100vh;
             -webkit-tap-highlight-color: transparent;
         }
 
         header {
             width: 100%;
-            max-width: 380px;
+            max-width: 360px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             margin-bottom: 12px;
         }
-        .app-title { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+        .app-brand {
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.3px;
+        }
 
         .view-wrapper {
             position: relative;
             width: 100%;
             max-width: 360px;
             aspect-ratio: 1 / 1;
-            border-radius: 20px;
+            border-radius: 22px;
             overflow: hidden;
-            background: #000;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--card-border);
+            background: #020617;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--card-border);
             cursor: crosshair;
             touch-action: none;
         }
@@ -69,25 +86,25 @@
 
         .reticle-corners {
             position: absolute;
-            inset: 20px;
+            inset: 22px;
             pointer-events: none;
-            border: 2px dashed rgba(255, 255, 255, 0.15);
-            border-radius: 12px;
+            border: 2px dashed rgba(148, 163, 184, 0.25);
+            border-radius: 14px;
             z-index: 5;
         }
 
         .focus-indicator {
             position: absolute;
-            width: 54px;
-            height: 54px;
-            border: 2px solid #ffd600;
+            width: 50px;
+            height: 50px;
+            border: 2px solid var(--accent-cyan);
             border-radius: 50%;
             pointer-events: none;
             opacity: 0;
             transform: translate(-50%, -50%) scale(1.4);
             transition: opacity 0.2s, transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             z-index: 25;
-            box-shadow: 0 0 10px rgba(255, 214, 0, 0.4);
+            box-shadow: 0 0 14px rgba(6, 182, 212, 0.45);
         }
 
         .status-badge {
@@ -95,13 +112,13 @@
             top: 14px;
             left: 14px;
             padding: 6px 12px;
-            border-radius: 20px;
+            border-radius: 30px;
             font-size: 11px;
             font-weight: 600;
-            background: rgba(12, 13, 17, 0.75);
-            backdrop-filter: blur(8px);
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(10px);
             border: 1px solid var(--card-border);
-            color: #ffab00;
+            color: #f59e0b;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -113,20 +130,20 @@
             position: absolute;
             top: 14px;
             right: 14px;
-            width: 48px;
-            height: 48px;
+            width: 46px;
+            height: 46px;
             border-radius: 50%;
-            background: rgba(12, 13, 17, 0.75);
-            backdrop-filter: blur(8px);
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(10px);
             border: 1px solid var(--card-border);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 10;
         }
-        .gyro-target { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 1px dashed rgba(255,255,255,0.4); }
-        .gyro-bubble { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ffab00; box-shadow: 0 0 8px #ffab00; transition: transform 0.05s linear; }
-        .gyro-label { position: absolute; bottom: -17px; font-size: 9px; font-weight: 600; color: var(--text-muted); }
+        .gyro-target { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 1px dashed rgba(255,255,255,0.3); }
+        .gyro-bubble { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 8px #f59e0b; transition: transform 0.05s linear; }
+        .gyro-label { position: absolute; bottom: -17px; font-size: 9px; font-weight: 600; color: var(--text-secondary); }
 
         .container {
             width: 100%;
@@ -138,26 +155,81 @@
         }
 
         .result-card {
-            background: var(--card-bg);
+            background: var(--bg-card);
             border: 1px solid var(--card-border);
-            border-radius: 16px;
+            border-radius: 18px;
             padding: 16px;
             text-align: center;
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(14px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
         }
-        .result-label { font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-        .result-val-wrap { display: flex; align-items: baseline; justify-content: center; gap: 4px; margin: 4px 0; }
-        .result-val { font-size: 2.4rem; color: var(--accent-green); font-weight: 800; font-feature-settings: "tnum"; }
-        .result-unit { font-size: 1.1rem; color: var(--accent-green); font-weight: 600; }
-        .info-msg { font-size: 12px; color: var(--text-muted); }
+        .result-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.8px; }
+        .result-val-wrap { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin: 4px 0; }
+        .result-val {
+            font-size: 2.6rem;
+            color: var(--accent-mint);
+            font-weight: 800;
+            letter-spacing: -1px;
+            font-feature-settings: "tnum";
+            text-shadow: 0 0 24px var(--accent-mint-glow);
+        }
+        .result-unit { font-size: 1.15rem; color: var(--accent-mint); font-weight: 600; }
+        .info-msg { font-size: 12px; color: var(--text-secondary); }
+
+        .mode-toggle-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            background: #0f172a;
+            padding: 5px;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+        }
+        .mode-toggle-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 9px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 9px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .mode-toggle-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+        }
+
+        .panel-box {
+            background: var(--bg-card);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            backdrop-filter: blur(14px);
+        }
+
+        .slider-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #1e293b;
+            accent-color: var(--accent-cyan);
+            outline: none;
+        }
 
         .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .btn {
-            background: var(--accent-blue);
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: #fff;
             border: none;
-            padding: 14px 16px;
-            font-size: 14px;
+            padding: 13px 14px;
+            font-size: 13.5px;
             border-radius: 12px;
             font-weight: 600;
             cursor: pointer;
@@ -166,97 +238,69 @@
             justify-content: center;
             gap: 8px;
             transition: transform 0.12s ease, opacity 0.12s ease;
-            box-shadow: 0 4px 12px rgba(41, 121, 255, 0.25);
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
             user-select: none;
         }
         .btn:active:not(:disabled) { transform: scale(0.97); }
-        .btn:disabled { background: #1f2229; color: #4e5566; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
-        .btn-secondary { background: #1c1f26; border: 1px solid var(--card-border); color: #fff; box-shadow: none; }
-        .btn-green { background: var(--accent-green); color: #000; box-shadow: 0 4px 14px rgba(0, 230, 118, 0.3); }
-        .btn-red { background: rgba(255, 61, 113, 0.15); border: 1px solid rgba(255, 61, 113, 0.3); color: var(--accent-red); padding: 6px 10px; font-size: 12px; border-radius: 8px; }
-
-        .panel-box {
-            background: var(--card-bg);
+        .btn:disabled { background: #1e293b; color: #475569; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+        .btn-secondary {
+            background: #1e293b;
             border: 1px solid var(--card-border);
-            border-radius: 14px;
-            padding: 12px 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+            color: #f1f5f9;
+            box-shadow: none;
         }
-
-        .mode-toggle-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            background: #12141a;
-            padding: 4px;
-            border-radius: 10px;
-            border: 1px solid var(--card-border);
-        }
-        .mode-toggle-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            padding: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        .mode-toggle-btn.active {
-            background: var(--accent-blue);
+        .btn-green {
+            background: linear-gradient(135deg, #10b981, #059669);
             color: #fff;
-            box-shadow: 0 2px 8px rgba(41, 121, 255, 0.3);
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+        }
+        .btn-red {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--accent-red);
+            padding: 5px 8px;
+            font-size: 11px;
+            border-radius: 6px;
         }
 
         .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .input-group { display: flex; flex-direction: column; gap: 4px; }
-        .input-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        .input-label { font-size: 10.5px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
 
         select, .input-text {
-            background: #12141a;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
+            background: #0f172a;
+            border: 1px solid var(--card-border);
+            color: #f8fafc;
             padding: 10px;
             border-radius: 10px;
             font-size: 13px;
             outline: none;
             width: 100%;
         }
-        select:focus, .input-text:focus { border-color: var(--accent-blue); }
-
-        .slider-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); font-weight: 500; }
-        input[type="range"] {
-            width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: #1f2229;
-            accent-color: var(--accent-blue);
-            outline: none;
-        }
+        select:focus, .input-text:focus { border-color: var(--accent-cyan); }
 
         .log-section {
-            background: var(--card-bg);
+            background: var(--bg-card);
             border: 1px solid var(--card-border);
-            border-radius: 16px;
+            border-radius: 18px;
             padding: 14px;
             display: flex;
             flex-direction: column;
             gap: 10px;
+            backdrop-filter: blur(14px);
         }
         .log-header { display: flex; justify-content: space-between; align-items: center; }
-        .log-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
+        .log-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); }
         .table-wrap {
             max-height: 190px;
             overflow-y: auto;
             border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--card-border);
+            background: #0b1120;
         }
         table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-        th, td { padding: 9px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); }
-        th { background: #161820; color: var(--text-muted); font-weight: 500; position: sticky; top: 0; }
+        th, td { padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
+        th { background: #131d33; color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; }
 
         .export-btns {
             display: grid;
@@ -277,7 +321,7 @@
 <body>
 
     <header>
-        <div class="app-title">
+        <div class="app-brand">
             <span>📐</span>
             <span>Rock Area Core</span>
         </div>
@@ -303,32 +347,32 @@
     </div>
 
     <div class="container">
-        <!-- Результат замера -->
+        <!-- Блок площади -->
         <div class="result-card">
             <div class="result-label">Площадь скола</div>
             <div class="result-val-wrap">
                 <span class="result-val" id="area-display">0.00</span>
                 <span class="result-unit">см²</span>
             </div>
-            <div class="info-msg" id="info-display">Нажмите на экран для точной фокусировки</div>
+            <div class="info-msg" id="info-display">Нажмите на область для ручной фокусировки</div>
         </div>
 
-        <!-- Переключатель режима: Авто или Ручной -->
+        <!-- Переключатель режима: Автопорог или Ручное лассо -->
         <div class="mode-toggle-group" id="contour-mode-group" style="display: none;">
-            <button class="mode-toggle-btn active" id="mode-auto-btn">⚡ Авто (Порог)</button>
-            <button class="mode-toggle-btn" id="mode-manual-btn">✏️ Ручной (Лассо)</button>
+            <button class="mode-toggle-btn active" id="mode-auto-btn">⚡ Автопорог</button>
+            <button class="mode-toggle-btn" id="mode-manual-btn">✏️ Ручное лассо</button>
         </div>
 
-        <!-- Ползунок порога отсечения фона под результатом -->
+        <!-- Порог отсечения фона прямо под результатом -->
         <div class="panel-box" id="threshold-box">
             <div class="slider-row">
                 <span>Порог отсечения фона</span>
-                <span id="thresh-val" style="color: var(--accent-blue); font-weight: 600;">Авто</span>
+                <span id="thresh-val" style="color: var(--accent-cyan); font-weight: 600;">Авто</span>
             </div>
             <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
 
-        <!-- Кнопка сброса ручного контура -->
+        <!-- Кнопка очистки ручного контура -->
         <button class="btn btn-secondary" id="clear-manual-btn" style="display: none; width: 100%;">
             <span>🧹</span> Сбросить ручной контур
         </button>
@@ -391,8 +435,8 @@
             </div>
 
             <div class="export-btns">
-                <button class="btn btn-secondary" id="export-csv-btn">💾 Сохранить (CSV)</button>
-                <button class="btn btn-secondary" id="export-zip-btn">📦 Сохранить (ZIP)</button>
+                <button class="btn btn-secondary" id="export-csv-btn">💾 В Загрузки (CSV)</button>
+                <button class="btn btn-secondary" id="export-zip-btn">📦 В Загрузки (ZIP)</button>
             </div>
             <button class="btn btn-secondary" id="share-report-btn" style="width: 100%; margin-top: 6px;">
                 <span>📤</span> Поделиться отчётом (CSV)
@@ -480,7 +524,7 @@
         function onOpenCvReady() {
             cvReady = true;
             statusText.textContent = 'Готов к замеру';
-            statusBadge.style.color = '#00e676';
+            statusBadge.style.color = '#10b981';
             captureBtn.disabled = false;
             galleryBtn.disabled = false;
         }
@@ -493,7 +537,7 @@
                 gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
                 const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
                 gyroLabel.textContent = `${Math.round(totalTilt)}°`;
-                gyroBubble.style.background = totalTilt <= 4 ? '#00e676' : '#ffab00';
+                gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
             });
         }
 
@@ -646,14 +690,14 @@
             manualPoints = [];
             modeAutoBtn.classList.add('active');
             modeManualBtn.classList.remove('active');
-            infoDisplay.textContent = 'Нажмите на экран для точной фокусировки';
+            infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
             initCamera();
         }
 
         // =============================================================
-        // ЛОГИКА РУЧНОГО ЛАССО И РЕДАКТИРОВАНИЯ ТОЧЕК
+        // РУЧНОЙ РЕЖИМ ЛАССО И РЕДАКТИРОВАНИЯ ТОЧЕК
         // =============================================================
         modeAutoBtn.onclick = () => {
             if (!isManualMode) return;
@@ -678,7 +722,7 @@
             manualCanvas.width = WARP_SIZE;
             manualCanvas.height = WARP_SIZE;
 
-            infoDisplay.innerHTML = `<span style="color:var(--accent-blue);">Обведите скол пальцем. Точки можно двигать!</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Обведите скол пальцем. Точки можно смещать!</span>`;
             redrawManualCanvas();
         };
 
@@ -687,7 +731,7 @@
             currentCalculatedArea = "0.00";
             areaDisplay.textContent = "0.00";
             redrawManualCanvas();
-            infoDisplay.innerHTML = `<span style="color:var(--accent-blue);">Контур сброшен. Нарисуйте новый контур пальцем.</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Контур сброшен. Обведите скол заново.</span>`;
         };
 
         function getCanvasCoordinates(e) {
@@ -707,7 +751,7 @@
             activePointIndex = -1;
             for (let i = 0; i < manualPoints.length; i++) {
                 const dist = Math.hypot(manualPoints[i].x - pt.x, manualPoints[i].y - pt.y);
-                if (dist < 22) {
+                if (dist < 24) {
                     activePointIndex = i;
                     break;
                 }
@@ -770,7 +814,7 @@
             const realAreaCm2 = getRealAreaCm2();
             currentCalculatedArea = ((areaPx / (WARP_SIZE * WARP_SIZE)) * realAreaCm2).toFixed(2);
             areaDisplay.textContent = currentCalculatedArea;
-            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ Ручной замер: S = ${currentCalculatedArea} см²</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-mint);">✓ Ручной замер: S = ${currentCalculatedArea} см²</span>`;
         }
 
         function redrawManualCanvas() {
@@ -788,28 +832,28 @@
                 manualCtx.lineTo(manualPoints[i].x, manualPoints[i].y);
             }
             manualCtx.closePath();
-            manualCtx.fillStyle = "rgba(0, 230, 118, 0.45)";
+            manualCtx.fillStyle = "rgba(16, 185, 129, 0.42)";
             manualCtx.fill();
 
-            manualCtx.strokeStyle = "#00e676";
+            manualCtx.strokeStyle = "#10b981";
             manualCtx.lineWidth = 3;
             manualCtx.stroke();
 
             if (!isDrawing && manualPoints.length >= 3) {
                 manualPoints.forEach((p, idx) => {
                     manualCtx.beginPath();
-                    manualCtx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-                    manualCtx.fillStyle = idx === activePointIndex ? "#ffd600" : "#ffffff";
+                    manualCtx.arc(p.x, p.y, 6.5, 0, Math.PI * 2);
+                    manualCtx.fillStyle = idx === activePointIndex ? "#38bdf8" : "#ffffff";
                     manualCtx.fill();
-                    manualCtx.strokeStyle = "#000000";
-                    manualCtx.lineWidth = 1.5;
+                    manualCtx.strokeStyle = "#0f172a";
+                    manualCtx.lineWidth = 2;
                     manualCtx.stroke();
                 });
             }
         }
 
         // =============================================================
-        // ОБРАБОТКА КАМЕРЫ И ГАЛЕРЕИ
+        // ОБРАБОТКА КАДРА
         // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
@@ -883,7 +927,7 @@
             saveRecordsToStorage();
             renderTable();
 
-            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ Записан в журнал: ${name}</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-mint);">✓ Записан в журнал: ${name}</span>`;
             savePanel.style.display = 'none';
         });
 
@@ -891,7 +935,7 @@
             try {
                 localStorage.setItem('rock_test_records', JSON.stringify(records));
             } catch (e) {
-                alert('Память переполнена! Экспортируйте фотопак (ZIP) и очистите журнал.');
+                alert('Память переполнена! Экспортируйте архив (ZIP) и очистите журнал.');
             }
         }
 
@@ -904,8 +948,8 @@
                 tr.innerHTML = `
                     <td>${idx + 1}</td>
                     <td><b>${rec.name}</b></td>
-                    <td style="color:var(--accent-green); font-weight:700;">${rec.area}</td>
-                    <td style="color:var(--text-muted);">${rec.baseMm} мм</td>
+                    <td style="color:var(--accent-mint); font-weight:700;">${rec.area}</td>
+                    <td style="color:var(--text-secondary);">${rec.baseMm} мм</td>
                     <td><button class="btn-red" onclick="deleteRecord(${rec.id})">✕</button></td>
                 `;
                 logTbody.appendChild(tr);
@@ -927,41 +971,53 @@
             }
         });
 
-                // =============================================================
-        // ПРЯМОЕ СОХРАНЕНИЕ В ПАПКУ "ЗАГРУЗКИ" (БЕЗ ДИАЛОГОВ И ШТОРОК)
         // =============================================================
-        function saveDirectlyToDownloads(blobData, fileName) {
-            // 1. Для Android Cordova APK
+        // ТО САМОЕ РАБОЧЕЕ СОХРАНЕНИЕ В ПАПКУ DOWNLOAD СМАРТФОНА
+        // =============================================================
+        function saveDirectlyToDevice(blobData, fileName) {
+            // Android APK (Cordova)
             if (window.cordova && cordova.file) {
-                // Прямой физический путь к общей системной папке Download
-                const downloadDirUri = cordova.file.externalRootDirectory 
+                const targetDirUri = cordova.file.externalRootDirectory 
                     ? (cordova.file.externalRootDirectory + 'Download/') 
                     : cordova.file.dataDirectory;
 
-                window.resolveLocalFileSystemURL(downloadDirUri, function(dirEntry) {
+                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                alert(`✓ Файл сохранён в папку "Загрузки":\n${fileName}`);
+                                alert(`✓ Файл успешно сохранён в память устройства:\nПапка Download -> ${fileName}`);
                             };
                             writer.onerror = function(err) {
-                                alert('Ошибка записи на диск: ' + JSON.stringify(err));
+                                alert('Ошибка записи на накопитель: ' + JSON.stringify(err));
                             };
-                            // Записываем готовый Blob — он пишет данные целиком
+                            // Записываем бинарный Blob
                             writer.write(blobData);
                         }, function(err) {
-                            alert('Ошибка инициализации записи: ' + JSON.stringify(err));
+                            alert('Ошибка инициализации: ' + JSON.stringify(err));
                         });
                     }, function(err) {
-                        alert('Не удалось создать файл в Download: ' + JSON.stringify(err));
+                        // Резервный путь в открытую память
+                        const fallbackUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
+                        window.resolveLocalFileSystemURL(fallbackUri, function(fallbackDir) {
+                            fallbackDir.getFile(fileName, { create: true, exclusive: false }, function(fEntry) {
+                                fEntry.createWriter(function(w) {
+                                    w.onwriteend = function() {
+                                        alert(`✓ Файл сохранён во внутреннюю память:\n${fileName}`);
+                                    };
+                                    w.write(blobData);
+                                });
+                            });
+                        }, function(e) {
+                            alert('Не удалось создать файл: ' + JSON.stringify(e));
+                        });
                     });
                 }, function(err) {
-                    alert('Нет доступа к папке Загрузки: ' + JSON.stringify(err));
+                    alert('Нет доступа к файловой системе: ' + JSON.stringify(err));
                 });
                 return;
             }
 
-            // 2. Для браузера на ПК
+            // Для браузера на ПК
             const blobUrl = URL.createObjectURL(blobData);
             const a = document.createElement('a');
             a.href = blobUrl;
@@ -974,7 +1030,7 @@
             }, 1000);
         }
 
-        // 1. Выгрузка CSV таблицы
+        // 1. Выгрузка CSV
         exportCsvBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -985,13 +1041,13 @@
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
                 
-                saveDirectlyToDownloads(blob, fileName);
+                saveDirectlyToDevice(blob, fileName);
             } catch (err) {
                 alert('Ошибка CSV: ' + err.message);
             }
         };
 
-        // 2. Выгрузка ZIP архива
+        // 2. Выгрузка ZIP-архива
         exportZipBtn.onclick = async function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1018,11 +1074,10 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                // Генерируем ZIP напрямую в бинарный Blob
                 const zipBlob = await zip.generateAsync({ type: "blob" });
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveDirectlyToDownloads(zipBlob, fileName);
+                saveDirectlyToDevice(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания архива: ' + err.message);
             } finally {
@@ -1031,65 +1086,7 @@
             }
         };
 
-
-        // 1. Сохранение CSV (вызывает системное меню выбора папки с полным весом)
-        exportCsvBtn.onclick = function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст!');
-                return;
-            }
-            try {
-                const csvContent = generateCsvString();
-                const encoder = new TextEncoder();
-                const arrayBuffer = encoder.encode(csvContent).buffer;
-                const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                
-                exportFileWithNativeChooser(arrayBuffer, fileName, 'text/csv');
-            } catch (err) {
-                alert('Ошибка CSV: ' + err.message);
-            }
-        };
-
-        // 2. Сохранение ZIP (вызывает системное меню выбора папки с реальным весом)
-        exportZipBtn.onclick = async function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст!');
-                return;
-            }
-            if (typeof JSZip === 'undefined') {
-                alert('Библиотека JSZip ещё загружается...');
-                return;
-            }
-
-            exportZipBtn.style.opacity = '0.5';
-            exportZipBtn.style.pointerEvents = 'none';
-
-            try {
-                const zip = new JSZip();
-                const folderRaw = zip.folder("1_Исходники");
-                const folderMasks = zip.folder("2_Контуры_маски");
-
-                records.forEach((rec, idx) => {
-                    const prefix = `${idx + 1}_${rec.name}`;
-                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-                });
-
-                const zipArrayBuffer = await zip.generateAsync({ type: "arraybuffer" });
-                const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
-
-                exportFileWithNativeChooser(zipArrayBuffer, fileName, 'application/zip');
-            } catch (err) {
-                alert('Ошибка создания архива: ' + err.message);
-            } finally {
-                exportZipBtn.style.opacity = '1';
-                exportZipBtn.style.pointerEvents = 'auto';
-            }
-        };
-
-        // 3. Отдельная кнопка «Поделиться отчётом» (прямая отправка в мессенджеры/почту)
+        // 3. Отдельная кнопка «Поделиться отчётом (CSV)»
         shareReportBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1290,14 +1287,14 @@
                 for (let c = 0; c < cropped.cols; c++) {
                     if (solidMask.ucharPtr(r, c)[0] > 0) {
                         let ptr = cropped.ucharPtr(r, c);
-                        ptr[0] = 0; ptr[1] = 230; ptr[2] = 80;
+                        ptr[0] = 16; ptr[1] = 185; ptr[2] = 129;
                     }
                 }
             }
 
             cv.imshow('output-canvas', warped);
             areaDisplay.textContent = currentCalculatedArea;
-            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ База ${frameSizeInput.value} мм | S = ${currentCalculatedArea} см²</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-mint);">✓ База ${frameSizeInput.value} мм | S = ${currentCalculatedArea} см²</span>`;
 
             srcTri.delete(); dstTri.delete(); M.delete(); warped.delete();
             cropped.delete(); cropGray.delete(); cropBlur.delete();
@@ -1313,7 +1310,7 @@
                     if (status.hasPermission) {
                         initCamera();
                     } else {
-                        alert('Для работы прибора требуется доступ к камере.');
+                        alert('Для работы планиметра требуется доступ к камере.');
                     }
                 }, function() {
                     initCamera();
