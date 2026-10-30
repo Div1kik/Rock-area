@@ -41,16 +41,19 @@ jobs:
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-          # Официальные стабильные плагины
+          # Только 100% стабильные официальные плагины без конфликтов AndroidX
           cordova plugin add cordova-plugin-camera
           cordova plugin add cordova-plugin-android-permissions
           cordova plugin add cordova-plugin-file
           cordova plugin add es6-promise-plugin
           cordova plugin add cordova-plugin-x-socialsharing
-          # Плагин мгновенного запуска файла в установленных приложениях (Excel)
-          cordova plugin add cordova-plugin-file-opener2
 
           cordova platform add android
+
+          # Разрешаем видеопотоку автовоспроизведение в фоне без кнопки Play
+          CONFIG="config.xml"
+          sed -i '/<\/widget>/i <preference name="MediaPlaybackRequiresUserAction" value="false" />' "$CONFIG"
+          sed -i '/<\/widget>/i <preference name="AllowInlineMediaPlayback" value="true" />' "$CONFIG"
 
           MANIFEST="platforms/android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
