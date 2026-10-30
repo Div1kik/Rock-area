@@ -510,6 +510,7 @@
                 </div>
             </div>
 
+            <!-- Только чистые кнопки сохранения без лишних окон -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <button class="btn btn-green" id="export-excel-period-btn">
                     <span>💾</span> Скачать CSV
@@ -1288,8 +1289,8 @@
             }
         };
 
-        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В DOCUMENTS
-        function saveBlobDirectlyToDevice(blob, fileName) {
+        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В DOCUMENTS БЕЗ ИСПОЛЬЗОВАНИЯ BLOB ДЛЯ Cordova FileWriter
+        function saveDataDirectlyToDevice(data, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
                 
@@ -1297,18 +1298,25 @@
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                fileEntry.file(function(realFile) {
-                                    const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents/`);
-                                });
+                                alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\n\nПапка: Documents (Документы)`);
                             };
-                            writer.write(blob);
+                            writer.onerror = function(e) {
+                                alert('Ошибка записи файла: ' + e.toString());
+                            };
+                            // Записываем данные напрямую (String или ArrayBuffer), чтобы Cordova не создавала пустые файлы 0 байт
+                            writer.write(data);
                         });
+                    }, function(err) {
+                        alert('Ошибка создания файла: ' + err.code);
                     });
+                }, function(err) {
+                    alert('Ошибка доступа к Документам: ' + err.code);
                 });
                 return;
             }
 
+            // Fallback для запуска в десктопном браузере (ему всё ещё нужен Blob)
+            let blob = data instanceof Blob ? data : new Blob([data]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1333,10 +1341,10 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'image/jpeg' });
             const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
 
-            saveBlobDirectlyToDevice(blob, fileName);
+            // Передаем ArrayBuffer
+            saveDataDirectlyToDevice(byteArray.buffer, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1369,7 +1377,7 @@
             return csv;
         }
 
-        // Скачивание CSV с конвертацией в Uint8Array для правильной записи
+        // Скачивание CSV таблицы (передаём чистый текст)
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1381,14 +1389,11 @@
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
-            
-            const csvBytes = new TextEncoder().encode(csvContent);
-            const blob = new Blob([csvBytes], { type: 'text/csv;charset=utf-8' });
 
-            saveBlobDirectlyToDevice(blob, fileName);
+            saveDataDirectlyToDevice(csvContent, fileName);
         };
 
-        // Пакетный ZIP-архив с явным выводом в Uint8Array
+        // Пакетный ZIP-архив (передаём ArrayBuffer)
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1419,9 +1424,8 @@
                 const toStr = filterDateTo.value || 'все';
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
-                const zipArray = await zip.generateAsync({ type: "uint8array" });
-                const zipBlob = new Blob([zipArray], { type: "application/zip" });
-                saveBlobDirectlyToDevice(zipBlob, fileName);
+                const zipContent = await zip.generateAsync({ type: "arraybuffer" });
+                saveDataDirectlyToDevice(zipContent, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1430,7 +1434,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола с конвертацией в Uint8Array
+        // Формирование HTML-фотопротокола (передаём чистый текст)
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1496,9 +1500,7 @@
 </body>
 </html>`;
 
-            const htmlBytes = new TextEncoder().encode(htmlDoc);
-            const blob = new Blob([htmlBytes], { type: 'text/html;charset=utf-8' });
-            saveBlobDirectlyToDevice(blob, fileName);
+            saveDataDirectlyToDevice(htmlDoc, fileName);
         };
 
         // =============================================================
