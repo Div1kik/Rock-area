@@ -81,7 +81,6 @@
             overflow: hidden;
             background: #020617;
             box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--card-border);
-            cursor: crosshair;
             touch-action: none;
         }
 
@@ -97,6 +96,23 @@
             z-index: 15;
             display: none;
         }
+
+        .zoom-loupe {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 3px solid var(--accent-cyan);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.7), 0 0 16px rgba(6, 182, 212, 0.4);
+            overflow: hidden;
+            background: #000;
+            z-index: 30;
+            display: none;
+            pointer-events: none;
+        }
+        .zoom-loupe canvas { width: 100%; height: 100%; }
 
         .reticle-corners {
             position: absolute;
@@ -278,6 +294,13 @@
             cursor: pointer;
         }
 
+        .zoom-controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
         .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         .input-label { font-size: 10.5px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -294,7 +317,6 @@
         }
         select:focus, .input-text:focus { border-color: var(--accent-cyan); }
 
-        /* Полноэкранное модальное окно архива */
         .archive-modal {
             position: fixed;
             inset: 0;
@@ -306,15 +328,8 @@
             padding: 16px 14px 24px;
             overflow-y: auto;
         }
-
-        .archive-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 14px;
-        }
+        .archive-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
         .archive-title { font-size: 1.25rem; font-weight: 700; }
-
         .archive-filter-card {
             background: var(--bg-card);
             border: 1px solid var(--card-border);
@@ -325,16 +340,8 @@
             gap: 12px;
             margin-bottom: 14px;
         }
-
         .filter-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-
-        .archive-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-
+        .archive-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
         .archive-item {
             background: var(--bg-card);
             border: 1px solid var(--card-border);
@@ -345,12 +352,10 @@
             justify-content: space-between;
             gap: 10px;
         }
-
         .item-info { display: flex; flex-direction: column; gap: 3px; }
         .item-name { font-size: 14px; font-weight: 700; }
         .item-meta { font-size: 11.5px; color: var(--text-secondary); }
         .item-area { font-size: 15px; font-weight: 800; color: var(--accent-mint); margin-top: 2px; }
-
         .item-actions { display: flex; align-items: center; gap: 8px; }
         .item-btn {
             background: #1e293b;
@@ -365,7 +370,6 @@
             gap: 4px;
         }
 
-        /* Модалка просмотра фото */
         .photo-viewer {
             position: fixed;
             inset: 0;
@@ -377,7 +381,7 @@
             justify-content: center;
             padding: 16px;
         }
-        .viewer-img { max-width: 100%; max-height: 70vh; border-radius: 12px; border: 1px solid var(--card-border); }
+        .viewer-img { max-width: 90vw; max-height: 65vh; border-radius: 12px; border: 1px solid var(--card-border); object-fit: contain; }
         .viewer-controls { margin-top: 14px; display: flex; gap: 10px; }
     </style>
 </head>
@@ -394,9 +398,14 @@
     </header>
 
     <div class="view-wrapper" id="view-wrapper">
-        <video id="webcam" autoplay playsinline></video>
+        <video id="webcam" autoplay playsinline muted></video>
         <canvas id="output-canvas" style="display: none;"></canvas>
         <canvas id="manual-canvas"></canvas>
+        
+        <div class="zoom-loupe" id="zoom-loupe">
+            <canvas id="loupe-canvas" width="90" height="90"></canvas>
+        </div>
+
         <div class="reticle-corners"></div>
         <div class="focus-indicator" id="focus-indicator"></div>
 
@@ -413,7 +422,6 @@
     </div>
 
     <div class="container">
-        <!-- Блок площади -->
         <div class="result-card">
             <div class="result-label">Площадь скола</div>
             <div class="result-val-wrap">
@@ -423,13 +431,11 @@
             <div class="info-msg" id="info-display">Нажмите на область для ручной фокусировки</div>
         </div>
 
-        <!-- Переключатель режима: Автопорог или Ручное лассо -->
         <div class="mode-toggle-group" id="contour-mode-group" style="display: none;">
             <button class="mode-toggle-btn active" id="mode-auto-btn">⚡ Автопорог</button>
             <button class="mode-toggle-btn" id="mode-manual-btn">✏️ Ручное лассо</button>
         </div>
 
-        <!-- Порог отсечения фона под результатом -->
         <div class="panel-box" id="threshold-box">
             <div class="slider-row">
                 <span>Порог отсечения фона</span>
@@ -438,9 +444,14 @@
             <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
 
-        <!-- Кнопка сброса ручного контура -->
+        <div class="zoom-controls-row" id="manual-zoom-tools" style="display: none;">
+            <button class="btn btn-secondary" id="zoom-in-btn" style="flex: 1;">🔍 Увеличить (+)</button>
+            <button class="btn btn-secondary" id="zoom-out-btn" style="flex: 1;">🔍 Уменьшить (-)</button>
+            <button class="btn btn-secondary" id="zoom-reset-btn" style="flex: 1;">1:1 Сброс</button>
+        </div>
+
         <button class="btn btn-secondary" id="clear-manual-btn" style="display: none; width: 100%;">
-            <span>🧹</span> Сбросить ручной контур
+            <span>🧹</span> Сбросить контур лассо
         </button>
 
         <div class="btn-row" id="main-btns-row">
@@ -487,7 +498,6 @@
             <button class="header-btn" id="close-archive-btn">✕ Закрыть</button>
         </div>
 
-        <!-- Фильтр дат и выгрузка Excel -->
         <div class="archive-filter-card">
             <div class="filter-dates">
                 <div class="input-group">
@@ -500,7 +510,7 @@
                 </div>
             </div>
             <button class="btn btn-green" id="export-excel-period-btn">
-                <span>📊</span> Выгрузить Excel (.xls) за период
+                <span>📊</span> Сохранить таблицу Excel (CSV)
             </button>
         </div>
 
@@ -531,6 +541,10 @@
         const manualCanvas = document.getElementById('manual-canvas');
         const manualCtx = manualCanvas.getContext('2d');
 
+        const zoomLoupe = document.getElementById('zoom-loupe');
+        const loupeCanvas = document.getElementById('loupe-canvas');
+        const loupeCtx = loupeCanvas.getContext('2d');
+
         const captureBtn = document.getElementById('capture-btn');
         const galleryBtn = document.getElementById('gallery-btn');
         const resetBtn = document.getElementById('reset-btn');
@@ -542,6 +556,10 @@
         const modeManualBtn = document.getElementById('mode-manual-btn');
         const thresholdBox = document.getElementById('threshold-box');
         const clearManualBtn = document.getElementById('clear-manual-btn');
+        const manualZoomTools = document.getElementById('manual-zoom-tools');
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        const zoomResetBtn = document.getElementById('zoom-reset-btn');
 
         const targetMode = document.getElementById('target-mode');
         const frameSizeInput = document.getElementById('frame-size-input');
@@ -560,7 +578,6 @@
         const gyroBubble = document.getElementById('gyro-bubble');
         const gyroLabel = document.getElementById('gyro-label');
 
-        // Элементы архива
         const openArchiveBtn = document.getElementById('open-archive-btn');
         const closeArchiveBtn = document.getElementById('close-archive-btn');
         const archiveModal = document.getElementById('archive-modal');
@@ -572,7 +589,6 @@
         const filteredCount = document.getElementById('filtered-count');
         const clearAllArchiveBtn = document.getElementById('clear-all-archive-btn');
 
-        // Просмотр фото
         const photoViewer = document.getElementById('photo-viewer');
         const viewerImgEl = document.getElementById('viewer-img-el');
         const togglePhotoModeBtn = document.getElementById('toggle-photo-mode-btn');
@@ -597,6 +613,13 @@
         let isDrawing = false;
         let activePointIndex = -1;
         let warpedBaseCanvas = null;
+
+        let zoomScale = 1.0;
+        let panOffsetX = 0;
+        let panOffsetY = 0;
+        let initialPinchDistance = null;
+        let startPanX = 0;
+        let startPanY = 0;
 
         let records = JSON.parse(localStorage.getItem('rock_test_records') || '[]');
 
@@ -639,33 +662,33 @@
         }
 
         async function initCamera() {
-            stopCamera();
             if (isCaptured) return;
-
-            const configs = [
-                {
-                    video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 1920 },
-                        advanced: [{ focusMode: "continuous" }]
-                    },
-                    audio: false
+            const constraints = {
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 }
                 },
-                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false },
-                { video: { facingMode: "environment" }, audio: false },
-                { video: true, audio: false }
-            ];
+                audio: false
+            };
 
-            for (let config of configs) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                mediaStream = stream;
+                video.srcObject = stream;
+                await video.play();
+                videoTrack = stream.getVideoTracks()[0];
+                applyContinuousFocus();
+            } catch (err) {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia(config);
-                    mediaStream = stream;
-                    video.srcObject = stream;
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    mediaStream = fallbackStream;
+                    video.srcObject = fallbackStream;
                     await video.play();
-                    videoTrack = stream.getVideoTracks()[0];
-                    applyContinuousFocus();
-                    return;
-                } catch (err) {}
+                    videoTrack = fallbackStream.getVideoTracks()[0];
+                } catch (e) {
+                    statusText.textContent = 'Камера недоступна';
+                }
             }
         }
 
@@ -755,7 +778,7 @@
             savePanel.style.display = 'flex';
             contourModeGroup.style.display = 'grid';
             sampleNameInput.value = `Керн-${records.length + 1}`;
-            stopCamera();
+            if (video) video.pause();
         }
 
         function resetToLiveMode() {
@@ -769,19 +792,28 @@
             savePanel.style.display = 'none';
             contourModeGroup.style.display = 'none';
             clearManualBtn.style.display = 'none';
+            manualZoomTools.style.display = 'none';
             thresholdBox.style.display = 'flex';
+            zoomLoupe.style.display = 'none';
             isManualMode = false;
             manualPoints = [];
+            zoomScale = 1.0;
+            panOffsetX = 0;
+            panOffsetY = 0;
             modeAutoBtn.classList.add('active');
             modeManualBtn.classList.remove('active');
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            initCamera();
+            if (video.srcObject) {
+                video.play();
+            } else {
+                initCamera();
+            }
         }
 
         // =============================================================
-        // РУЧНОЙ РЕЖИМ ЛАССО И РЕДАКТИРОВАНИЯ ТОЧЕК
+        // РУЧНОЙ РЕЖИМ ЛАССО, ЗУМ И ЛУПА
         // =============================================================
         modeAutoBtn.onclick = () => {
             if (!isManualMode) return;
@@ -790,7 +822,9 @@
             modeManualBtn.classList.remove('active');
             thresholdBox.style.display = 'flex';
             clearManualBtn.style.display = 'none';
+            manualZoomTools.style.display = 'none';
             manualCanvas.style.display = 'none';
+            zoomLoupe.style.display = 'none';
             if (lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
         };
 
@@ -801,12 +835,29 @@
             modeAutoBtn.classList.remove('active');
             thresholdBox.style.display = 'none';
             clearManualBtn.style.display = 'flex';
+            manualZoomTools.style.display = 'flex';
             manualCanvas.style.display = 'block';
 
             manualCanvas.width = WARP_SIZE;
             manualCanvas.height = WARP_SIZE;
 
-            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Обведите скол пальцем. Точки можно смещать!</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Обведите керн. Доступен зум (+/-) и лупа при сдвиге!</span>`;
+            redrawManualCanvas();
+        };
+
+        zoomInBtn.onclick = () => {
+            zoomScale = Math.min(3.5, zoomScale + 0.35);
+            redrawManualCanvas();
+        };
+        zoomOutBtn.onclick = () => {
+            zoomScale = Math.max(1.0, zoomScale - 0.35);
+            if (zoomScale === 1.0) { panOffsetX = 0; panOffsetY = 0; }
+            redrawManualCanvas();
+        };
+        zoomResetBtn.onclick = () => {
+            zoomScale = 1.0;
+            panOffsetX = 0;
+            panOffsetY = 0;
             redrawManualCanvas();
         };
 
@@ -815,62 +866,133 @@
             currentCalculatedArea = "0.00";
             areaDisplay.textContent = "0.00";
             redrawManualCanvas();
-            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Контур сброшен. Обведите скол заново.</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-cyan);">Контур сброшен. Нанесите новый контур.</span>`;
         };
 
-        function getCanvasCoordinates(e) {
+        function getCanvasCoordinates(clientX, clientY) {
             const rect = manualCanvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const rawX = ((clientX - rect.left) / rect.width) * WARP_SIZE;
+            const rawY = ((clientY - rect.top) / rect.height) * WARP_SIZE;
             return {
-                x: ((clientX - rect.left) / rect.width) * WARP_SIZE,
-                y: ((clientY - rect.top) / rect.height) * WARP_SIZE
+                x: (rawX - panOffsetX) / zoomScale,
+                y: (rawY - panOffsetY) / zoomScale
             };
         }
 
-        manualCanvas.addEventListener('pointerdown', (e) => {
+        function updateLoupe(screenX, screenY) {
+            if (!warpedBaseCanvas) return;
+            zoomLoupe.style.display = 'block';
+
+            loupeCtx.clearRect(0, 0, 90, 90);
+            loupeCtx.save();
+            loupeCtx.beginPath();
+            loupeCtx.arc(45, 45, 45, 0, Math.PI * 2);
+            loupeCtx.clip();
+
+            const zoomFactor = 2.5;
+            const sourceW = 90 / zoomFactor;
+            const sourceH = 90 / zoomFactor;
+            const sourceX = Math.max(0, Math.min(WARP_SIZE - sourceW, screenX - sourceW / 2));
+            const sourceY = Math.max(0, Math.min(WARP_SIZE - sourceH, screenY - sourceH / 2));
+
+            loupeCtx.drawImage(warpedBaseCanvas, sourceX, sourceY, sourceW, sourceH, 0, 0, 90, 90);
+
+            loupeCtx.strokeStyle = '#06b6d4';
+            loupeCtx.lineWidth = 1.5;
+            loupeCtx.beginPath();
+            loupeCtx.moveTo(45, 30); loupeCtx.lineTo(45, 60);
+            loupeCtx.moveTo(30, 45); loupeCtx.lineTo(60, 45);
+            loupeCtx.stroke();
+            loupeCtx.restore();
+        }
+
+        manualCanvas.addEventListener('touchstart', (e) => {
             if (!isManualMode) return;
-            const pt = getCanvasCoordinates(e);
+
+            if (e.touches.length === 2) {
+                isDrawing = false;
+                activePointIndex = -1;
+                zoomLoupe.style.display = 'none';
+                initialPinchDistance = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                return;
+            }
+
+            const touch = e.touches[0];
+            const pt = getCanvasCoordinates(touch.clientX, touch.clientY);
 
             activePointIndex = -1;
+            const hitRadius = 26 / zoomScale;
             for (let i = 0; i < manualPoints.length; i++) {
                 const dist = Math.hypot(manualPoints[i].x - pt.x, manualPoints[i].y - pt.y);
-                if (dist < 24) {
+                if (dist < hitRadius) {
                     activePointIndex = i;
+                    updateLoupe(manualPoints[i].x, manualPoints[i].y);
                     break;
                 }
             }
 
             if (activePointIndex === -1) {
-                isDrawing = true;
-                manualPoints = [pt];
+                if (manualPoints.length > 2 && zoomScale > 1.05) {
+                    startPanX = touch.clientX - panOffsetX;
+                    startPanY = touch.clientY - panOffsetY;
+                } else {
+                    isDrawing = true;
+                    manualPoints = [pt];
+                }
             }
             redrawManualCanvas();
         });
 
-        manualCanvas.addEventListener('pointermove', (e) => {
+        manualCanvas.addEventListener('touchmove', (e) => {
             if (!isManualMode) return;
-            const pt = getCanvasCoordinates(e);
+
+            if (e.touches.length === 2 && initialPinchDistance) {
+                const dist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                const factor = dist / initialPinchDistance;
+                zoomScale = Math.max(1.0, Math.min(3.5, zoomScale * factor));
+                initialPinchDistance = dist;
+                redrawManualCanvas();
+                return;
+            }
+
+            const touch = e.touches[0];
+            const pt = getCanvasCoordinates(touch.clientX, touch.clientY);
 
             if (activePointIndex !== -1) {
                 manualPoints[activePointIndex] = pt;
+                updateLoupe(pt.x, pt.y);
                 calculateManualArea();
                 redrawManualCanvas();
             } else if (isDrawing) {
                 const last = manualPoints[manualPoints.length - 1];
-                if (!last || Math.hypot(last.x - pt.x, last.y - pt.y) > 8) {
+                if (!last || Math.hypot(last.x - pt.x, last.y - pt.y) > (8 / zoomScale)) {
                     manualPoints.push(pt);
                     redrawManualCanvas();
                 }
+            } else if (zoomScale > 1.05 && startPanX) {
+                panOffsetX = touch.clientX - startPanX;
+                panOffsetY = touch.clientY - startPanY;
+                redrawManualCanvas();
             }
         });
 
-        manualCanvas.addEventListener('pointerup', () => {
+        manualCanvas.addEventListener('touchend', () => {
             if (!isManualMode) return;
+            zoomLoupe.style.display = 'none';
+            initialPinchDistance = null;
+            startPanX = 0;
+            startPanY = 0;
+
             if (isDrawing) {
                 isDrawing = false;
                 if (manualPoints.length > 25) {
-                    const step = Math.ceil(manualPoints.length / 20);
+                    const step = Math.ceil(manualPoints.length / 22);
                     manualPoints = manualPoints.filter((_, idx) => idx % step === 0);
                 }
                 calculateManualArea();
@@ -904,36 +1026,42 @@
         function redrawManualCanvas() {
             manualCtx.clearRect(0, 0, WARP_SIZE, WARP_SIZE);
 
+            manualCtx.save();
+            manualCtx.translate(panOffsetX, panOffsetY);
+            manualCtx.scale(zoomScale, zoomScale);
+
             if (warpedBaseCanvas) {
                 manualCtx.drawImage(warpedBaseCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
             }
 
-            if (manualPoints.length < 2) return;
+            if (manualPoints.length >= 2) {
+                manualCtx.beginPath();
+                manualCtx.moveTo(manualPoints[0].x, manualPoints[0].y);
+                for (let i = 1; i < manualPoints.length; i++) {
+                    manualCtx.lineTo(manualPoints[i].x, manualPoints[i].y);
+                }
+                manualCtx.closePath();
+                manualCtx.fillStyle = "rgba(16, 185, 129, 0.42)";
+                manualCtx.fill();
 
-            manualCtx.beginPath();
-            manualCtx.moveTo(manualPoints[0].x, manualPoints[0].y);
-            for (let i = 1; i < manualPoints.length; i++) {
-                manualCtx.lineTo(manualPoints[i].x, manualPoints[i].y);
+                manualCtx.strokeStyle = "#10b981";
+                manualCtx.lineWidth = 3 / zoomScale;
+                manualCtx.stroke();
+
+                if (!isDrawing && manualPoints.length >= 3) {
+                    manualPoints.forEach((p, idx) => {
+                        manualCtx.beginPath();
+                        manualCtx.arc(p.x, p.y, 6.5 / zoomScale, 0, Math.PI * 2);
+                        manualCtx.fillStyle = idx === activePointIndex ? "#38bdf8" : "#ffffff";
+                        manualCtx.fill();
+                        manualCtx.strokeStyle = "#0f172a";
+                        manualCtx.lineWidth = 2 / zoomScale;
+                        manualCtx.stroke();
+                    });
+                }
             }
-            manualCtx.closePath();
-            manualCtx.fillStyle = "rgba(16, 185, 129, 0.42)";
-            manualCtx.fill();
 
-            manualCtx.strokeStyle = "#10b981";
-            manualCtx.lineWidth = 3;
-            manualCtx.stroke();
-
-            if (!isDrawing && manualPoints.length >= 3) {
-                manualPoints.forEach((p, idx) => {
-                    manualCtx.beginPath();
-                    manualCtx.arc(p.x, p.y, 6.5, 0, Math.PI * 2);
-                    manualCtx.fillStyle = idx === activePointIndex ? "#38bdf8" : "#ffffff";
-                    manualCtx.fill();
-                    manualCtx.strokeStyle = "#0f172a";
-                    manualCtx.lineWidth = 2;
-                    manualCtx.stroke();
-                });
-            }
+            manualCtx.restore();
         }
 
         // =============================================================
@@ -941,13 +1069,15 @@
         // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = video.videoWidth || 640;
-            tempCanvas.height = video.videoHeight || 640;
-            tempCanvas.getContext('2d').drawImage(video, 0, 0);
+
+            const snapCanvas = document.createElement('canvas');
+            snapCanvas.width = video.videoWidth || 1280;
+            snapCanvas.height = video.videoHeight || 720;
+            const ctx = snapCanvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
 
             if (lastRawMat) lastRawMat.delete();
-            lastRawMat = cv.imread(tempCanvas);
+            lastRawMat = cv.imread(snapCanvas);
 
             showResultMode();
             processFrame(lastRawMat, null);
@@ -969,7 +1099,8 @@
                     const tempCanvas = document.createElement('canvas');
                     tempCanvas.width = img.width;
                     tempCanvas.height = img.height;
-                    tempCanvas.getContext('2d').drawImage(img, 0, 0);
+                    const ctx = tempCanvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
@@ -984,15 +1115,46 @@
 
         resetBtn.addEventListener('click', resetToLiveMode);
 
+        // Гарантированное создание фото маски без чёрных кадров
+        function generateMaskSnapshot() {
+            const offscreen = document.createElement('canvas');
+            offscreen.width = WARP_SIZE;
+            offscreen.height = WARP_SIZE;
+            const oCtx = offscreen.getContext('2d');
+
+            if (warpedBaseCanvas) {
+                oCtx.drawImage(warpedBaseCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
+            }
+
+            if (isManualMode && manualPoints.length >= 3) {
+                oCtx.beginPath();
+                oCtx.moveTo(manualPoints[0].x, manualPoints[0].y);
+                for (let i = 1; i < manualPoints.length; i++) {
+                    oCtx.lineTo(manualPoints[i].x, manualPoints[i].y);
+                }
+                oCtx.closePath();
+                oCtx.fillStyle = "rgba(16, 185, 129, 0.45)";
+                oCtx.fill();
+                oCtx.strokeStyle = "#10b981";
+                oCtx.lineWidth = 3;
+                oCtx.stroke();
+            } else if (outputCanvas) {
+                oCtx.drawImage(outputCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
+            }
+            return offscreen.toDataURL('image/jpeg', 0.85);
+        }
+
         saveRecordBtn.addEventListener('click', () => {
             const name = sampleNameInput.value.trim() || `Образец-${records.length + 1}`;
             const now = new Date();
             const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             const dateStr = now.toISOString().slice(0, 10);
 
-            const rawPhotoData = lastRawCroppedCanvas.toDataURL('image/jpeg', 0.85);
-            const maskCanvas = isManualMode ? manualCanvas : outputCanvas;
-            const maskPhotoData = maskCanvas.toDataURL('image/jpeg', 0.85);
+            const rawPhotoData = lastRawCroppedCanvas 
+                ? lastRawCroppedCanvas.toDataURL('image/jpeg', 0.85)
+                : (warpedBaseCanvas ? warpedBaseCanvas.toDataURL('image/jpeg', 0.85) : '');
+
+            const maskPhotoData = generateMaskSnapshot();
 
             const record = {
                 id: Date.now(),
@@ -1019,7 +1181,7 @@
             try {
                 localStorage.setItem('rock_test_records', JSON.stringify(records));
             } catch (e) {
-                alert('Память заполнена! Очистите часть записей из архива.');
+                alert('Память заполнена! Очистите часть замеров из архива.');
             }
         }
 
@@ -1028,7 +1190,7 @@
         }
 
         // =============================================================
-        // ЛОГИКА АРХИВА, ФИЛЬТРАЦИИ И EXCEL (.XLS)
+        // АРХИВ И СОХРАНЕНИЕ CSV В ПАМЯТЬ СМАРТФОНА
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1061,7 +1223,7 @@
             archiveListContainer.innerHTML = '';
 
             if (filtered.length === 0) {
-                archiveListContainer.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-secondary); font-size:13px;">За замеров за выбранный период не найдено.</div>`;
+                archiveListContainer.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-secondary); font-size:13px;">Замеров за выбранный период не найдено.</div>`;
                 return;
             }
 
@@ -1104,7 +1266,7 @@
             }
         };
 
-        // Просмотр фото образца
+        // Корректный просмотр фото и маски
         window.openPhotoViewer = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec) return;
@@ -1127,71 +1289,16 @@
             currentViewingRecord = null;
         };
 
-        // Генерация нативной рабочей книги Excel XML Spreadsheet (.xls)
-        function generateExcelXml(recordsArray) {
-            let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Styles>
-  <Style ss:ID="Header">
-   <Font ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
-   <Alignment ss:Horizontal="Center"/>
-  </Style>
-  <Style ss:ID="NumberCell">
-   <NumberFormat ss:Format="0.00"/>
-   <Alignment ss:Horizontal="Right"/>
-  </Style>
-  <Style ss:ID="StandardCell">
-   <Alignment ss:Horizontal="Left"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="Замеры Керна">
-  <Table>
-   <Column ss:Width="30"/>
-   <Column ss:Width="120"/>
-   <Column ss:Width="100"/>
-   <Column ss:Width="80"/>
-   <Column ss:Width="110"/>
-   <Column ss:Width="80"/>
-   <Column ss:Width="60"/>
-   <Column ss:Width="70"/>
-   <Row ss:StyleID="Header">
-    <Cell><Data ss:Type="String">№</Data></Cell>
-    <Cell><Data ss:Type="String">Шифр образца</Data></Cell>
-    <Cell><Data ss:Type="String">Площадь, см²</Data></Cell>
-    <Cell><Data ss:Type="String">База, мм</Data></Cell>
-    <Cell><Data ss:Type="String">Режим</Data></Cell>
-    <Cell><Data ss:Type="String">Дата</Data></Cell>
-    <Cell><Data ss:Type="String">Время</Data></Cell>
-    <Cell><Data ss:Type="String">Порог</Data></Cell>
-   </Row>`;
-
+        // Формирование безупречного CSV (с UTF-8 BOM и разделителем ;)
+        function generateCsvStringForArray(recordsArray) {
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
             recordsArray.forEach((r, i) => {
-                xml += `
-   <Row>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="Number">${i + 1}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.name}</Data></Cell>
-    <Cell ss:StyleID="NumberCell"><Data ss:Type="Number">${r.area}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="Number">${r.baseMm}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.mode}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.date}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.time}</Data></Cell>
-    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.threshold}</Data></Cell>
-   </Row>`;
+                csv += `${i + 1};${r.name};${r.area};${r.baseMm};${r.mode};${r.date};${r.time};${r.threshold}\n`;
             });
-
-            xml += `
-  </Table>
- </Worksheet>
-</Workbook>`;
-            return xml;
+            return csv;
         }
 
-        // Выгрузка Excel за период (через системный шеринг файла — открывается сразу в Excel/диске)
+        // Прямое сохранение таблицы на устройство без всплывающих шторок
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1201,28 +1308,26 @@
 
             const fromStr = filterDateFrom.value || 'все';
             const toStr = filterDateTo.value || 'все';
-            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.xls`;
-            const xmlContent = generateExcelXml(filtered);
+            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
+            const csvContent = generateCsvStringForArray(filtered);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
 
-            if (window.plugins && window.plugins.socialsharing && window.cordova && cordova.file) {
-                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
+            if (window.cordova && cordova.file) {
+                const targetDirUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                window.plugins.socialsharing.shareWithOptions({
-                                    message: `Сводный отчёт Excel: ${fileName}`,
-                                    subject: fileName,
-                                    files: [fileEntry.nativeURL]
+                                fileEntry.file(function(realFile) {
+                                    const sizeKb = (realFile.size / 1024).toFixed(1);
+                                    alert(`✓ Таблица успешно сохранена!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть на телефоне:\nAndroid/data/com.div1kik.rockarea/files/`);
                                 });
                             };
-                            writer.write(xmlContent);
+                            writer.write(blob);
                         });
                     });
                 });
             } else {
-                // Для браузера ПК
-                const blob = new Blob([xmlContent], { type: 'application/vnd.ms-excel' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -1337,8 +1442,19 @@
 
             if (!quad) {
                 cv.imshow('output-canvas', srcMat);
-                infoDisplay.innerHTML = `<span style="color:var(--accent-red);">${mode === 'frame' ? 'Рамка не найдена!' : '4 маркера не распознаны!'}</span>`;
+                infoDisplay.innerHTML = `<span style="color:var(--accent-red);">${mode === 'frame' ? 'Рамка не найдена!' : '4 маркера не найдены!'} Перейдите в "Ручное лассо"</span>`;
                 areaDisplay.textContent = '0.00';
+
+                warpedBaseCanvas = document.createElement('canvas');
+                warpedBaseCanvas.width = WARP_SIZE;
+                warpedBaseCanvas.height = WARP_SIZE;
+                const baseCtx = warpedBaseCanvas.getContext('2d');
+                baseCtx.drawImage(outputCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
+
+                lastRawCroppedCanvas = document.createElement('canvas');
+                lastRawCroppedCanvas.width = WARP_SIZE;
+                lastRawCroppedCanvas.height = WARP_SIZE;
+                lastRawCroppedCanvas.getContext('2d').drawImage(outputCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
                 return;
             }
 
@@ -1368,7 +1484,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
