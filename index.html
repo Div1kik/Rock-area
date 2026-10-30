@@ -1067,19 +1067,18 @@
         }
 
         // =============================================================
-        // ОБРАБОТКА КАДРА (БЕЗ ЗАТЕМНЕНИЯ И ПУСТЫХ СНИМКОВ)
+        // ОБРАБОТКА КАДРА (ЧЕТКИЙ И СТАБИЛЬНЫЙ АВТОПОРОГ)
         // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            const w = video.videoWidth || 1280;
-            const h = video.videoHeight || 720;
+            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
+            const h = video.videoHeight > 0 ? video.videoHeight : 720;
             snapCanvas.width = w;
             snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
             
-            // Захватываем пиксели ДО смены режимов и скрытия видео
             ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
@@ -1195,7 +1194,7 @@
         }
 
         // =============================================================
-        // АРХИВ И ПЕРВОНАЧАЛЬНОЕ РАБОЧЕЕ СОХРАНЕНИЕ
+        // АРХИВ И СОХРАНЕНИЕ В ПАПКУ ДОКУМЕНТЫ (РОДНАЯ РАБОЧАЯ ВЕРСИЯ)
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1274,17 +1273,20 @@
             }
         };
 
-        // ПЕРВОНАЧАЛЬНЫЙ РАБОЧИЙ МЕТОД СОХРАНЕНИЯ (БЕЗ ДВОЙНЫХ ОКОН)
+        // ПРОВЕРЕННОЕ СОХРАНЕНИЕ В ПАПКУ DOCUMENTS
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
+                const targetDirUri = cordova.file.externalRootDirectory 
+                    ? (cordova.file.externalRootDirectory + 'Documents/') 
+                    : (cordova.file.externalDataDirectory || cordova.file.dataDirectory);
+
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
                                 fileEntry.file(function(realFile) {
                                     const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть: Android/data/com.div1kik.rockarea/files/`);
+                                    alert(`✓ Файл сохранён на телефон!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
                                 });
                             };
                             writer.write(blob);
@@ -1306,7 +1308,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски
+        // Скачивание фото маски конкретного замера
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
