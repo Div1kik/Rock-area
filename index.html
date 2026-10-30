@@ -435,8 +435,8 @@
             </div>
 
             <div class="export-btns">
-                <button class="btn btn-secondary" id="export-csv-btn">💾 В Загрузки (CSV)</button>
-                <button class="btn btn-secondary" id="export-zip-btn">📦 В Загрузки (ZIP)</button>
+                <button class="btn btn-secondary" id="export-csv-btn">💾 Сохранить (CSV)</button>
+                <button class="btn btn-secondary" id="export-zip-btn">📦 Сохранить (ZIP)</button>
             </div>
             <button class="btn btn-secondary" id="share-report-btn" style="width: 100%; margin-top: 6px;">
                 <span>📤</span> Поделиться отчётом (CSV)
@@ -972,50 +972,64 @@
         });
 
         // =============================================================
-        // НАСТОЯЩЕЕ СОХРАНЕНИЕ В ПАПКУ "ЗАГРУЗКИ" (ANDROID MEDIASTORE)
+        // НАДЁЖНОЕ СИСТЕМНОЕ СОХРАНЕНИЕ ФАЙЛОВ ANDROID (БЕЗ 0 БАЙТ)
         // =============================================================
-        function saveBase64ToDownloads(base64Payload, fileName, mimeType) {
-            // Очищаем префикс Data URL, если он есть
-            const cleanBase64 = base64Payload.replace(/^data:[^;]+;base64,/, "");
+        function saveDocumentViaSystemDialog(blobData, fileName, mimeType) {
+            // Android Cordova APK
+            if (window.cordova && cordova.file) {
+                // 1. Сначала пишем файл во внутреннюю память приложения со 100% честным весом
+                const safeDirUri = cordova.file.dataDirectory || cordova.file.cacheDirectory;
 
-            // 1. Для Android Cordova APK: вызов официального MediaStore API
-            if (window.cordova && cordova.plugins && cordova.plugins.mediastore) {
-                cordova.plugins.mediastore.saveToDownload(
-                    cleanBase64,
-                    fileName,
-                    mimeType,
-                    function() {
-                        alert(`✓ Файл успешно сохранён на устройство!\n\nПапка: Загрузки (Download)\nИмя: ${fileName}`);
-                    },
-                    function(err) {
-                        alert('Ошибка сохранения в MediaStore: ' + JSON.stringify(err));
-                    }
-                );
+                window.resolveLocalFileSystemURL(safeDirUri, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(writer) {
+                            writer.onwriteend = function() {
+                                // 2. Вызываем нативный Android интент: системный просмотрщик файлов с кнопкой Сохранить
+                                if (window.plugins && window.plugins.intentShim) {
+                                    window.plugins.intentShim.startActivity(
+                                        {
+                                            action: "android.intent.action.VIEW",
+                                            url: fileEntry.nativeURL,
+                                            type: mimeType,
+                                            flags: 1 // FLAG_GRANT_READ_URI_PERMISSION
+                                        },
+                                        function() {},
+                                        function() {
+                                            // Если просмотрщик не открылся, запускаем сохранение через диалог
+                                            window.plugins.socialsharing.shareWithOptions({
+                                                message: `Файл: ${fileName}`,
+                                                files: [fileEntry.nativeURL],
+                                                chooserTitle: 'Сохранить в память'
+                                            });
+                                        }
+                                    );
+                                } else if (window.plugins && window.plugins.socialsharing) {
+                                    window.plugins.socialsharing.shareWithOptions({
+                                        message: `Файл: ${fileName}`,
+                                        files: [fileEntry.nativeURL],
+                                        chooserTitle: 'Сохранить в память'
+                                    });
+                                }
+                            };
+                            writer.onerror = (err) => alert('Ошибка записи байтов: ' + JSON.stringify(err));
+                            writer.write(blobData);
+                        });
+                    }, (err) => alert('Ошибка создания контейнера: ' + JSON.stringify(err)));
+                }, (err) => alert('Ошибка хранилища: ' + JSON.stringify(err)));
                 return;
             }
 
-            // 2. Для тестирования в браузере на компьютере
-            try {
-                const byteCharacters = atob(cleanBase64);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray], { type: mimeType });
-                const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(blobUrl);
-                }, 1000);
-            } catch (e) {
-                alert('Ошибка скачивания: ' + e.message);
-            }
+            // Для ПК
+            const blobUrl = URL.createObjectURL(blobData);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+            }, 1000);
         }
 
         // 1. Выгрузка CSV таблицы
@@ -1026,11 +1040,10 @@
             }
             try {
                 const csvContent = generateCsvString();
-                // Кодируем CSV в Base64 с полной поддержкой кириллицы UTF-8
-                const base64Csv = btoa(unescape(encodeURIComponent(csvContent)));
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
                 
-                saveBase64ToDownloads(base64Csv, fileName, 'text/csv');
+                saveDocumentViaSystemDialog(blob, fileName, 'text/csv');
             } catch (err) {
                 alert('Ошибка CSV: ' + err.message);
             }
@@ -1063,13 +1076,12 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                // Генерируем ZIP сразу в строку Base64
-                const zipBase64 = await zip.generateAsync({ type: "base64" });
+                const zipBlob = await zip.generateAsync({ type: "blob" });
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveBase64ToDownloads(zipBase64, fileName, 'application/zip');
+                saveDocumentViaSystemDialog(zipBlob, fileName, 'application/zip');
             } catch (err) {
-                alert('Ошибка архиватора: ' + err.message);
+                alert('Ошибка создания архива: ' + err.message);
             } finally {
                 exportZipBtn.style.opacity = '1';
                 exportZipBtn.style.pointerEvents = 'auto';
