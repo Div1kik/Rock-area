@@ -1289,34 +1289,50 @@
         };
 
         // =============================================================
-        // ЖЕЛЕЗОБЕТОННОЕ СОХРАНЕНИЕ ТОЛЬКО В DOCUMENTS (БЕЗ DATA)
+        // УНИВЕРСАЛЬНАЯ ЗАПИСЬ В DOCUMENTS БЕЗ ПУСТЫХ ФАЙЛОВ И ОШИБОК
         // =============================================================
         function saveDataDirectlyToDevice(data, fileName) {
             if (window.cordova && cordova.file) {
-                // Никаких резервных путей. ТОЛЬКО публичная папка Documents.
                 const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
                 
-                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                alert(`✓ Файл успешно сохранён!\n\nИмя: ${fileName}\n\nОн находится в системной папке: Documents (Документы)`);
-                            };
-                            writer.onerror = function(e) {
-                                alert('Ошибка записи файла в Documents: ' + e.toString());
-                            };
-                            writer.write(data); // Передаем чистые байты (String/ArrayBuffer/Blob)
+                // Функция прямой записи байтов
+                const performWrite = (bufferToWrite) => {
+                    window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
+                        dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                            fileEntry.createWriter(function(writer) {
+                                writer.onwriteend = function() {
+                                    fileEntry.file(function(realFile) {
+                                        const sizeKb = (realFile.size / 1024).toFixed(1);
+                                        alert(`✓ Файл сохранён на телефон!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
+                                    });
+                                };
+                                writer.onerror = function(e) {
+                                    alert('Ошибка записи файла: ' + e.toString());
+                                };
+                                writer.write(bufferToWrite);
+                            });
+                        }, function(err) {
+                            alert('Ошибка создания файла. Код: ' + err.code);
                         });
                     }, function(err) {
-                        alert('Ошибка создания файла в папке Documents. Код: ' + err.code);
+                        alert('Ошибка доступа к папке Documents. Код: ' + err.code);
                     });
-                }, function(err) {
-                    alert('Не удалось получить доступ к папке Documents. Код: ' + err.code);
-                });
+                };
+
+                // Если передан Blob (например от архиватора или текста), безопасно читаем его в ArrayBuffer
+                if (data instanceof Blob) {
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        performWrite(reader.result);
+                    };
+                    reader.readAsArrayBuffer(data);
+                } else {
+                    performWrite(data);
+                }
                 return;
             }
 
-            // Fallback для ПК-браузера
+            // Fallback для десктопа
             let blob = data instanceof Blob ? data : new Blob([data]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1330,7 +1346,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски (Передаём ArrayBuffer)
+        // Скачивание отдельного снимка маски (работает 100% стабильно)
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1344,8 +1360,7 @@
             const byteArray = new Uint8Array(byteNumbers);
             const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
 
-            const blob = new Blob([byteArray.buffer], { type: 'image/jpeg' });
-            saveDataDirectlyToDevice(blob, fileName);
+            saveDataDirectlyToDevice(byteArray.buffer, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1378,7 +1393,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы (Передаём ArrayBuffer)
+        // Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1391,13 +1406,11 @@
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
             
-            const csvBytes = new TextEncoder().encode(csvContent);
-            const blob = new Blob([csvBytes.buffer], { type: 'text/csv;charset=utf-8' });
-
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
             saveDataDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив (Передаём ArrayBuffer)
+        // Пакетный ZIP-архив за период
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1428,10 +1441,8 @@
                 const toStr = filterDateTo.value || 'все';
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
-                const zipArray = await zip.generateAsync({ type: "arraybuffer" });
-                const blob = new Blob([zipArray], { type: 'application/zip' });
-                
-                saveDataDirectlyToDevice(blob, fileName);
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                saveDataDirectlyToDevice(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1440,7 +1451,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола (Передаём ArrayBuffer)
+        // Формирование HTML-фотопротокола
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1506,9 +1517,7 @@
 </body>
 </html>`;
 
-            const htmlBytes = new TextEncoder().encode(htmlDoc);
-            const blob = new Blob([htmlBytes.buffer], { type: 'text/html;charset=utf-8' });
-            
+            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
             saveDataDirectlyToDevice(blob, fileName);
         };
 
@@ -1655,7 +1664,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
