@@ -51,9 +51,21 @@
             background: #000;
             box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--card-border);
             cursor: crosshair;
+            touch-action: none;
         }
 
         video, canvas { width: 100%; height: 100%; object-fit: cover; }
+
+        #manual-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto;
+            z-index: 15;
+            display: none;
+        }
 
         .reticle-corners {
             position: absolute;
@@ -61,6 +73,7 @@
             pointer-events: none;
             border: 2px dashed rgba(255, 255, 255, 0.15);
             border-radius: 12px;
+            z-index: 5;
         }
 
         .focus-indicator {
@@ -75,16 +88,6 @@
             transition: opacity 0.2s, transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             z-index: 25;
             box-shadow: 0 0 10px rgba(255, 214, 0, 0.4);
-        }
-        .focus-indicator::after {
-            content: '';
-            position: absolute;
-            top: -6px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 2px;
-            height: 5px;
-            background: #ffd600;
         }
 
         .status-badge {
@@ -182,6 +185,32 @@
             gap: 10px;
         }
 
+        .mode-toggle-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            background: #12141a;
+            padding: 4px;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+        }
+        .mode-toggle-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .mode-toggle-btn.active {
+            background: var(--accent-blue);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(41, 121, 255, 0.3);
+        }
+
         .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .input-group { display: flex; flex-direction: column; gap: 4px; }
         .input-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
@@ -257,6 +286,7 @@
     <div class="view-wrapper" id="view-wrapper">
         <video id="webcam" autoplay playsinline></video>
         <canvas id="output-canvas" style="display: none;"></canvas>
+        <canvas id="manual-canvas"></canvas>
         <div class="reticle-corners"></div>
         <div class="focus-indicator" id="focus-indicator"></div>
 
@@ -273,7 +303,7 @@
     </div>
 
     <div class="container">
-        <!-- Блок результата измерения -->
+        <!-- Результат замера -->
         <div class="result-card">
             <div class="result-label">Площадь скола</div>
             <div class="result-val-wrap">
@@ -283,14 +313,25 @@
             <div class="info-msg" id="info-display">Нажмите на экран для точной фокусировки</div>
         </div>
 
-        <!-- ПОЛЗУНОК ПОРОГА ПЕРЕНЕСЕН ВВЕРХ СРАЗУ ПОД РЕЗУЛЬТАТ -->
-        <div class="panel-box">
+        <!-- Переключатель режима: Авто или Ручной -->
+        <div class="mode-toggle-group" id="contour-mode-group" style="display: none;">
+            <button class="mode-toggle-btn active" id="mode-auto-btn">⚡ Авто (Порог)</button>
+            <button class="mode-toggle-btn" id="mode-manual-btn">✏️ Ручной (Лассо)</button>
+        </div>
+
+        <!-- Ползунок порога отсечения фона под результатом -->
+        <div class="panel-box" id="threshold-box">
             <div class="slider-row">
                 <span>Порог отсечения фона</span>
                 <span id="thresh-val" style="color: var(--accent-blue); font-weight: 600;">Авто</span>
             </div>
             <input type="range" id="thresh-slider" min="30" max="220" value="110">
         </div>
+
+        <!-- Кнопка сброса ручного контура -->
+        <button class="btn btn-secondary" id="clear-manual-btn" style="display: none; width: 100%;">
+            <span>🧹</span> Сбросить ручной контур
+        </button>
 
         <div class="btn-row" id="main-btns-row">
             <button class="btn" id="capture-btn" disabled>
@@ -364,11 +405,20 @@
         const viewWrapper = document.getElementById('view-wrapper');
         const focusIndicator = document.getElementById('focus-indicator');
         const outputCanvas = document.getElementById('output-canvas');
+        const manualCanvas = document.getElementById('manual-canvas');
+        const manualCtx = manualCanvas.getContext('2d');
+
         const captureBtn = document.getElementById('capture-btn');
         const galleryBtn = document.getElementById('gallery-btn');
         const resetBtn = document.getElementById('reset-btn');
         const mainBtnsRow = document.getElementById('main-btns-row');
         const fileInput = document.getElementById('file-input');
+
+        const contourModeGroup = document.getElementById('contour-mode-group');
+        const modeAutoBtn = document.getElementById('mode-auto-btn');
+        const modeManualBtn = document.getElementById('mode-manual-btn');
+        const thresholdBox = document.getElementById('threshold-box');
+        const clearManualBtn = document.getElementById('clear-manual-btn');
 
         const targetMode = document.getElementById('target-mode');
         const frameSizeInput = document.getElementById('frame-size-input');
@@ -405,6 +455,13 @@
         let mediaStream = null;
         let videoTrack = null;
         let focusTimer = null;
+
+        // Переменные ручного контура
+        let isManualMode = false;
+        let manualPoints = []; // Массив точек [{x, y}] в координатах WARP_SIZE
+        let isDrawing = false;
+        let activePointIndex = -1; // Индекс перемещаемой точки при редактировании
+        let warpedBaseCanvas = null; // Холст с выпрямленным керном без наложенной маски
 
         let records = JSON.parse(localStorage.getItem('rock_test_records') || '[]');
 
@@ -534,11 +591,19 @@
 
         threshSlider.oninput = () => {
             threshVal.textContent = threshSlider.value;
-            if (isCaptured && lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+            if (isCaptured && lastRawMat && !isManualMode) {
+                processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+            }
         };
 
         frameSizeInput.oninput = () => {
-            if (isCaptured && lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+            if (isCaptured) {
+                if (isManualMode) {
+                    calculateManualArea();
+                } else if (lastRawMat) {
+                    processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+                }
+            }
         };
 
         targetMode.onchange = () => {
@@ -553,6 +618,7 @@
             mainBtnsRow.style.display = 'none';
             resetBtn.style.display = 'flex';
             savePanel.style.display = 'flex';
+            contourModeGroup.style.display = 'grid';
             sampleNameInput.value = `Керн-${records.length + 1}`;
             stopCamera();
         }
@@ -560,17 +626,193 @@
         function resetToLiveMode() {
             isCaptured = false;
             outputCanvas.style.display = 'none';
+            manualCanvas.style.display = 'none';
             video.style.display = 'block';
             gyroBox.style.display = 'flex';
             mainBtnsRow.style.display = 'grid';
             resetBtn.style.display = 'none';
             savePanel.style.display = 'none';
+            contourModeGroup.style.display = 'none';
+            clearManualBtn.style.display = 'none';
+            thresholdBox.style.display = 'flex';
+            isManualMode = false;
+            manualPoints = [];
+            modeAutoBtn.classList.add('active');
+            modeManualBtn.classList.remove('active');
             infoDisplay.textContent = 'Нажмите на экран для точной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
             initCamera();
         }
 
+        // =============================================================
+        // ЛОГИКА РУЧНОГО ЛАССО И РЕДАКТИРОВАНИЯ ТОЧЕК
+        // =============================================================
+        modeAutoBtn.onclick = () => {
+            if (!isManualMode) return;
+            isManualMode = false;
+            modeAutoBtn.classList.add('active');
+            modeManualBtn.classList.remove('active');
+            thresholdBox.style.display = 'flex';
+            clearManualBtn.style.display = 'none';
+            manualCanvas.style.display = 'none';
+            if (lastRawMat) processFrame(lastRawMat, parseInt(threshSlider.value, 10));
+        };
+
+        modeManualBtn.onclick = () => {
+            if (isManualMode) return;
+            isManualMode = true;
+            modeManualBtn.classList.add('active');
+            modeAutoBtn.classList.remove('active');
+            thresholdBox.style.display = 'none';
+            clearManualBtn.style.display = 'flex';
+            manualCanvas.style.display = 'block';
+
+            manualCanvas.width = WARP_SIZE;
+            manualCanvas.height = WARP_SIZE;
+
+            infoDisplay.innerHTML = `<span style="color:var(--accent-blue);">Обведите скол пальцем. Точки можно двигать!</span>`;
+            redrawManualCanvas();
+        };
+
+        clearManualBtn.onclick = () => {
+            manualPoints = [];
+            currentCalculatedArea = "0.00";
+            areaDisplay.textContent = "0.00";
+            redrawManualCanvas();
+            infoDisplay.innerHTML = `<span style="color:var(--accent-blue);">Контур сброшен. Нарисуйте новый контур пальцем.</span>`;
+        };
+
+        function getCanvasCoordinates(e) {
+            const rect = manualCanvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: ((clientX - rect.left) / rect.width) * WARP_SIZE,
+                y: ((clientY - rect.top) / rect.height) * WARP_SIZE
+            };
+        }
+
+        manualCanvas.addEventListener('pointerdown', (e) => {
+            if (!isManualMode) return;
+            const pt = getCanvasCoordinates(e);
+
+            // Проверяем: попал ли клик в существующую точку контура для редактирования (радиус захвата 22px)
+            activePointIndex = -1;
+            for (let i = 0; i < manualPoints.length; i++) {
+                const dist = Math.hypot(manualPoints[i].x - pt.x, manualPoints[i].y - pt.y);
+                if (dist < 22) {
+                    activePointIndex = i;
+                    break;
+                }
+            }
+
+            if (activePointIndex === -1) {
+                // Если точек ещё нет или рисуем заново
+                isDrawing = true;
+                manualPoints = [pt];
+            }
+            redrawManualCanvas();
+        });
+
+        manualCanvas.addEventListener('pointermove', (e) => {
+            if (!isManualMode) return;
+            const pt = getCanvasCoordinates(e);
+
+            if (activePointIndex !== -1) {
+                // Перетаскиваем существующую вершину
+                manualPoints[activePointIndex] = pt;
+                calculateManualArea();
+                redrawManualCanvas();
+            } else if (isDrawing) {
+                // Рисуем непрерывную линию лассо
+                const last = manualPoints[manualPoints.length - 1];
+                if (!last || Math.hypot(last.x - pt.x, last.y - pt.y) > 8) {
+                    manualPoints.push(pt);
+                    redrawManualCanvas();
+                }
+            }
+        });
+
+        manualCanvas.addEventListener('pointerup', () => {
+            if (!isManualMode) return;
+            if (isDrawing) {
+                isDrawing = false;
+                // Прореживаем точки для удобного последующего редактирования
+                if (manualPoints.length > 25) {
+                    const step = Math.ceil(manualPoints.length / 20);
+                    manualPoints = manualPoints.filter((_, idx) => idx % step === 0);
+                }
+                calculateManualArea();
+                redrawManualCanvas();
+            }
+            activePointIndex = -1;
+        });
+
+        // Расчёт площади многоугольника по формуле Гаусса (Shoelace formula)
+        function calculateManualArea() {
+            if (manualPoints.length < 3) {
+                currentCalculatedArea = "0.00";
+                areaDisplay.textContent = "0.00";
+                return;
+            }
+
+            let areaPx = 0;
+            const n = manualPoints.length;
+            for (let i = 0; i < n; i++) {
+                const j = (i + 1) % n;
+                areaPx += manualPoints[i].x * manualPoints[j].y;
+                areaPx -= manualPoints[j].x * manualPoints[i].y;
+            }
+            areaPx = Math.abs(areaPx) / 2.0;
+
+            const realAreaCm2 = getRealAreaCm2();
+            currentCalculatedArea = ((areaPx / (WARP_SIZE * WARP_SIZE)) * realAreaCm2).toFixed(2);
+            areaDisplay.textContent = currentCalculatedArea;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-green);">✓ Ручной замер: S = ${currentCalculatedArea} см²</span>`;
+        }
+
+        function redrawManualCanvas() {
+            manualCtx.clearRect(0, 0, WARP_SIZE, WARP_SIZE);
+
+            if (warpedBaseCanvas) {
+                manualCtx.drawImage(warpedBaseCanvas, 0, 0, WARP_SIZE, WARP_SIZE);
+            }
+
+            if (manualPoints.length < 2) return;
+
+            // Заливка полупрозрачной зелёной маской
+            manualCtx.beginPath();
+            manualCtx.moveTo(manualPoints[0].x, manualPoints[0].y);
+            for (let i = 1; i < manualPoints.length; i++) {
+                manualCtx.lineTo(manualPoints[i].x, manualPoints[i].y);
+            }
+            manualCtx.closePath();
+            manualCtx.fillStyle = "rgba(0, 230, 118, 0.45)";
+            manualCtx.fill();
+
+            // Линия контура
+            manualCtx.strokeStyle = "#00e676";
+            manualCtx.lineWidth = 3;
+            manualCtx.stroke();
+
+            // Интерактивные круглые ручки для редактирования
+            if (!isDrawing && manualPoints.length >= 3) {
+                manualPoints.forEach((p, idx) => {
+                    manualCtx.beginPath();
+                    manualCtx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                    manualCtx.fillStyle = idx === activePointIndex ? "#ffd600" : "#ffffff";
+                    manualCtx.fill();
+                    manualCtx.strokeStyle = "#000000";
+                    manualCtx.lineWidth = 1.5;
+                    manualCtx.stroke();
+                });
+            }
+        }
+
+        // =============================================================
+        // ОБРАБОТКА КАМЕРЫ И ГАЛЕРЕИ
+        // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
             const tempCanvas = document.createElement('canvas');
@@ -623,17 +865,19 @@
             const dateStr = now.toISOString().slice(0, 10);
 
             const rawPhotoData = lastRawCroppedCanvas.toDataURL('image/jpeg', 0.85);
-            const maskPhotoData = outputCanvas.toDataURL('image/jpeg', 0.85);
+            // Если включен ручной режим — сохраняем снимок с ручного холста, иначе с авто
+            const maskCanvas = isManualMode ? manualCanvas : outputCanvas;
+            const maskPhotoData = maskCanvas.toDataURL('image/jpeg', 0.85);
 
             const record = {
                 id: Date.now(),
                 name: name,
                 area: currentCalculatedArea,
                 baseMm: frameSizeInput.value,
-                mode: targetMode.value,
+                mode: isManualMode ? 'Ручной (Лассо)' : targetMode.value,
                 date: dateStr,
                 time: timeStr,
-                threshold: currentThreshApplied,
+                threshold: isManualMode ? 'Ручной' : currentThreshApplied,
                 rawImg: rawPhotoData,
                 maskImg: maskPhotoData
             };
@@ -687,33 +931,29 @@
         });
 
         // =============================================================
-        // СОХРАНЕНИЕ ФАЙЛОВ НА УСТРОЙСТВО (НАДЁЖНАЯ ЗАПИСЬ)
+        // СОХРАНЕНИЕ В ПАМЯТЬ ЧЕРЕЗ НАСТОЯЩИЙ ДИАЛОГ ANDROID (SAF)
         // =============================================================
-        function saveBinaryDataToDevice(blobData, fileName) {
-            // 1. Для Android Cordova APK
-            if (window.cordova && cordova.file) {
-                // Записываем во внешнюю память приложения, откуда Android разрешает прямую запись без сбоев
-                const targetDirUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-                
-                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
+        function saveBinaryDataToDevice(blobData, fileName, mimeType) {
+            // 1. Если запущен внутри Android APK (плагин SaveDialog)
+            if (window.cordova && cordova.plugins && cordova.plugins.saveDialog) {
+                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                alert(`✓ Файл записан на накопитель:\n${fileName}`);
+                                cordova.plugins.saveDialog.saveFile(fileEntry.nativeURL, mimeType, function() {
+                                    alert(`✓ Файл успешно сохранён на устройство:\n${fileName}`);
+                                }, function(err) {
+                                    if (err !== 'canceled') {
+                                        alert('Ошибка сохранения: ' + JSON.stringify(err));
+                                    }
+                                });
                             };
-                            writer.onerror = function(err) {
-                                alert('Ошибка записи: ' + JSON.stringify(err));
-                            };
+                            writer.onerror = (e) => alert('Ошибка подготовки файла: ' + JSON.stringify(e));
                             writer.write(blobData);
-                        }, function(err) {
-                            alert('Ошибка инициализации записи: ' + JSON.stringify(err));
                         });
-                    }, function(err) {
-                        alert('Не удалось создать файл: ' + JSON.stringify(err));
-                    });
-                }, function(err) {
-                    alert('Нет доступа к накопителю: ' + JSON.stringify(err));
-                });
+                    }, (err) => alert('Не удалось создать временный файл: ' + JSON.stringify(err)));
+                }, (err) => alert('Ошибка доступа: ' + JSON.stringify(err)));
                 return;
             }
 
@@ -730,7 +970,7 @@
             }, 1000);
         }
 
-        // Вспомогательная функция формирования CSV-строки
+        // Формирование CSV
         function generateCsvString() {
             let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
             records.forEach((rec, idx) => {
@@ -749,7 +989,7 @@
                 const csvContent = generateCsvString();
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                saveBinaryDataToDevice(blob, fileName);
+                saveBinaryDataToDevice(blob, fileName, 'text/csv');
             } catch (err) {
                 alert('Ошибка CSV: ' + err.message);
             }
@@ -785,7 +1025,7 @@
                 const zipBlob = await zip.generateAsync({ type: "blob" });
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveBinaryDataToDevice(zipBlob, fileName);
+                saveBinaryDataToDevice(zipBlob, fileName, 'application/zip');
             } catch (err) {
                 alert('Ошибка архиватора: ' + err.message);
             } finally {
@@ -794,7 +1034,7 @@
             }
         };
 
-        // 3. Отдельная кнопка «Поделиться отчётом» через системную шторку Android
+        // 3. Отдельная кнопка «Поделиться отчётом» через системную шторку Android (нетронутая)
         shareReportBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -939,6 +1179,12 @@
             let M = cv.getPerspectiveTransform(srcTri, dstTri);
             let warped = new cv.Mat();
             cv.warpPerspective(srcMat, warped, M, new cv.Size(WARP_SIZE, WARP_SIZE));
+
+            // Сохраняем выпрямленную подложку для ручного режима
+            warpedBaseCanvas = document.createElement('canvas');
+            warpedBaseCanvas.width = WARP_SIZE;
+            warpedBaseCanvas.height = WARP_SIZE;
+            cv.imshow(warpedBaseCanvas, warped);
 
             let pad = mode === 'frame' ? 25 : 10;
             let roiRect = new cv.Rect(pad, pad, WARP_SIZE - 2*pad, WARP_SIZE - 2*pad);
