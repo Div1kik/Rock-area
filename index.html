@@ -930,61 +930,49 @@
             }
         });
 
-                // =============================================================
-        // СОХРАНЕНИЕ В ПАМЯТЬ ЧЕРЕЗ НАСТОЯЩИЙ ДИАЛОГ ANDROID (SAF)
+                        // =============================================================
+        // СОХРАНЕНИЕ В ПАМЯТЬ ЧЕРЕЗ SAVE-DIALOG (НАПРЯМУЮ ИЗ ДАННЫХ)
         // =============================================================
-        function saveBinaryDataToDevice(blobData, fileName, mimeType) {
-            // 1. Если запущен внутри Android APK (плагин SaveDialog)
+        function saveFileDirectly(base64Uri, fileName, mimeType) {
             if (window.cordova && cordova.plugins && cordova.plugins.saveDialog) {
-                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                // ПРАВИЛЬНЫЙ ПОРЯДОК: (URL, Имя_файла, MIME-тип)
-                                cordova.plugins.saveDialog.saveFile(
-                                    fileEntry.nativeURL, 
-                                    fileName, 
-                                    mimeType, 
-                                    function(res) {
-                                        alert(`✓ Файл успешно сохранён на устройство:\n${fileName}`);
-                                    }, 
-                                    function(err) {
-                                        if (err !== 'canceled') {
-                                            alert('Ошибка сохранения: ' + JSON.stringify(err));
-                                        }
-                                    }
-                                );
-                            };
-                            writer.onerror = (e) => alert('Ошибка записи данных: ' + JSON.stringify(e));
-                            // Сбрасываем Blob в файл
-                            writer.write(blobData);
-                        });
-                    }, (err) => alert('Не удалось создать временный файл: ' + JSON.stringify(err)));
-                }, (err) => alert('Ошибка доступа: ' + JSON.stringify(err)));
+                cordova.plugins.saveDialog.saveFile(
+                    base64Uri,
+                    fileName,
+                    mimeType,
+                    function(res) {
+                        alert(`✓ Файл успешно сохранён на устройство:\n${fileName}`);
+                    },
+                    function(err) {
+                        if (err !== 'canceled') {
+                            alert('Ошибка сохранения: ' + JSON.stringify(err));
+                        }
+                    }
+                );
                 return;
             }
 
-            // 2. Для десктопного браузера
-            const blobUrl = URL.createObjectURL(blobData);
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(blobUrl);
-            }, 1000);
-        }
-
-        // Формирование CSV
-        function generateCsvString() {
-            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-            records.forEach((rec, idx) => {
-                csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
-            });
-            return csv;
+            try {
+                const arr = base64Uri.split(',');
+                const bstr = atob(arr[1]);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) {
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                const blob = new Blob([u8arr], { type: mimeType });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                }, 1000);
+            } catch (e) {
+                alert('Ошибка скачивания: ' + e.message);
+            }
         }
 
         // 1. Выгрузка CSV
@@ -995,15 +983,16 @@
             }
             try {
                 const csvContent = generateCsvString();
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+                const base64Csv = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csvContent)));
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                saveBinaryDataToDevice(blob, fileName, 'text/csv');
+                
+                saveFileDirectly(base64Csv, fileName, 'text/csv');
             } catch (err) {
                 alert('Ошибка CSV: ' + err.message);
             }
         };
 
-        // 2. Выгрузка ZIP архива
+        // 2. Выгрузка ZIP-архива
         exportZipBtn.onclick = async function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -1030,17 +1019,19 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                const zipBlob = await zip.generateAsync({ type: "blob" });
+                const zipBase64 = await zip.generateAsync({ type: "base64" });
+                const base64ZipUri = 'data:application/zip;base64,' + zipBase64;
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveBinaryDataToDevice(zipBlob, fileName, 'application/zip');
+                saveFileDirectly(base64ZipUri, fileName, 'application/zip');
             } catch (err) {
-                alert('Ошибка архиватора: ' + err.message);
+                alert('Ошибка создания архива: ' + err.message);
             } finally {
                 exportZipBtn.style.opacity = '1';
                 exportZipBtn.style.pointerEvents = 'auto';
             }
         };
+
 
         // 3. Отдельная кнопка «Поделиться отчётом» через системную шторку Android (нетронутая)
         shareReportBtn.onclick = function() {
