@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Лабораторный планиметр керна</title>
+    <!-- Подключение нативного моста Cordova для Android APK -->
     <script src="cordova.js"></script>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -348,9 +349,12 @@
             </div>
 
             <div class="export-btns">
-                <button class="btn btn-secondary" id="export-csv-btn">📊 Excel / CSV</button>
-                <button class="btn btn-secondary" id="export-zip-btn">📦 Фотопак (ZIP)</button>
+                <button class="btn btn-secondary" id="export-csv-btn">💾 В Загрузки (CSV)</button>
+                <button class="btn btn-secondary" id="export-zip-btn">📦 В Загрузки (ZIP)</button>
             </div>
+            <button class="btn btn-secondary" id="share-report-btn" style="width: 100%; margin-top: 6px;">
+                <span>📤</span> Поделиться отчётом (CSV)
+            </button>
         </div>
     </div>
 
@@ -386,6 +390,7 @@
         const recordCount = document.getElementById('record-count');
         const exportCsvBtn = document.getElementById('export-csv-btn');
         const exportZipBtn = document.getElementById('export-zip-btn');
+        const shareReportBtn = document.getElementById('share-report-btn');
         const clearAllBtn = document.getElementById('clear-all-btn');
 
         const WARP_SIZE = 500;
@@ -680,35 +685,50 @@
             }
         });
 
-                       // =============================================================
-        // ПРЯМОЙ ЭКСПОРТ ЧЕРЕЗ BASE64 (БЕЗ СБОЕВ ФАЙЛОВОЙ СИСТЕМЫ)
         // =============================================================
-        function shareBase64File(base64DataWithPrefix, fileName) {
-            // 1. Проверяем наличие плагина шторки Android (SocialSharing)
-            if (window.plugins && window.plugins.socialsharing) {
-                window.plugins.socialsharing.shareWithOptions({
-                    message: `Файл: ${fileName}`,
-                    subject: fileName,
-                    files: [base64DataWithPrefix]
-                }, function(result) {
-                    // Успешно открыто/отправлено
+        // СОХРАНЕНИЕ В ПАПКУ "DOWNLOAD" (БЕЗ ДИАЛОГОВ)
+        // =============================================================
+        function saveDirectlyToStorage(base64DataWithPrefix, fileName) {
+            const parts = base64DataWithPrefix.split(',');
+            const byteString = atob(parts[1]);
+            const mimeType = parts[0].split(':')[1].split(';')[0];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
+            }
+
+            // 1. Android APK (Cordova)
+            if (window.cordova && cordova.file) {
+                const targetDirUri = cordova.file.externalRootDirectory 
+                    ? (cordova.file.externalRootDirectory + 'Download/') 
+                    : cordova.file.dataDirectory;
+
+                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(writer) {
+                            writer.onwriteend = function() {
+                                alert(`✓ Файл сохранён в папку "Загрузки":\n${fileName}`);
+                            };
+                            writer.onerror = function(err) {
+                                alert('Ошибка записи на диск: ' + JSON.stringify(err));
+                            };
+                            writer.write(ab);
+                        }, function(err) {
+                            alert('Ошибка инициализации записи: ' + JSON.stringify(err));
+                        });
+                    }, function(err) {
+                        alert('Не удалось создать файл: ' + JSON.stringify(err));
+                    });
                 }, function(err) {
-                    alert('Ошибка отправки: ' + JSON.stringify(err));
+                    alert('Нет доступа к папке Download: ' + JSON.stringify(err));
                 });
                 return;
             }
 
-            // 2. Если открыто в обычном браузере на ПК
+            // 2. Обычный браузер (fallback)
             try {
-                const arr = base64DataWithPrefix.split(',');
-                const mime = arr[0].match(/:(.*?);/)[1];
-                const bstr = atob(arr[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
+                const blob = new Blob([ab], { type: mimeType });
                 const blobUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = blobUrl;
@@ -724,36 +744,37 @@
             }
         }
 
-        // 1. Выгрузка в Excel / CSV
+        // Вспомогательная функция формирования CSV-строки
+        function generateCsvString() {
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
+            records.forEach((rec, idx) => {
+                csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
+            });
+            return csv;
+        }
+
+        // 1. Сохранение CSV в Загрузки
         exportCsvBtn.onclick = function() {
             if (!records || records.length === 0) {
-                alert('Журнал смены пуст! Сделайте замер и сохраните его.');
+                alert('Журнал смены пуст!');
                 return;
             }
-
             try {
-                let csvContent = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-                records.forEach((rec, idx) => {
-                    csvContent += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
-                });
-
-                // Кодируем CSV в Base64 с поддержкой кириллицы
+                const csvContent = generateCsvString();
                 const base64Csv = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csvContent)));
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                
-                shareBase64File(base64Csv, fileName);
+                saveDirectlyToStorage(base64Csv, fileName);
             } catch (err) {
-                alert('Ошибка при выгрузке таблицы: ' + err.message);
+                alert('Ошибка: ' + err.message);
             }
         };
 
-        // 2. Выгрузка в ZIP (фотопак)
+        // 2. Сохранение ZIP-фотопака в Загрузки
         exportZipBtn.onclick = async function() {
             if (!records || records.length === 0) {
-                alert('Журнал смены пуст! Сделайте замер и сохраните его.');
+                alert('Журнал смены пуст!');
                 return;
             }
-
             if (typeof JSZip === 'undefined') {
                 alert('Библиотека JSZip ещё загружается...');
                 return;
@@ -775,21 +796,40 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                // Генерируем ZIP сразу в чистый base64 без промежуточных Blob и файловой системы
                 const zipBase64 = await zip.generateAsync({ type: "base64" });
                 const base64DataUri = 'data:application/zip;base64,' + zipBase64;
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                shareBase64File(base64DataUri, fileName);
+                saveDirectlyToStorage(base64DataUri, fileName);
             } catch (err) {
-                alert('Ошибка при создании архива: ' + err.message);
+                alert('Ошибка создания архива: ' + err.message);
             } finally {
                 exportZipBtn.style.opacity = '1';
                 exportZipBtn.style.pointerEvents = 'auto';
             }
         };
- 
 
+        // 3. Отдельная кнопка «Поделиться отчётом» через системную шторку Android
+        shareReportBtn.onclick = function() {
+            if (!records || records.length === 0) {
+                alert('Журнал смены пуст!');
+                return;
+            }
+
+            const csvContent = generateCsvString();
+            const base64Csv = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csvContent)));
+            const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
+
+            if (window.plugins && window.plugins.socialsharing) {
+                window.plugins.socialsharing.shareWithOptions({
+                    message: `Сводный отчёт: ${fileName}`,
+                    subject: fileName,
+                    files: [base64Csv]
+                }, () => {}, (err) => alert('Ошибка отправки: ' + JSON.stringify(err)));
+            } else {
+                alert('Функция отправки доступна на мобильном устройстве.');
+            }
+        };
 
         function orderPoints(ptsArr) {
             ptsArr.sort((a, b) => a.y - b.y);
