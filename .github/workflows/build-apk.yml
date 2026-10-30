@@ -1,110 +1,69 @@
-        // =============================================================
-        // ЖЕЛЕЗОБЕТОННЫЙ ЭКСПОРТ (SocialSharing -> Web Share -> Fallback)
-        // =============================================================
-        function deliverFileToSystem(blobData, fileName) {
-            // 1. Если внутри Cordova приложения (через системный шеринг файлов)
-            if (window.plugins && window.plugins.socialsharing && window.resolveLocalFileSystemURL) {
-                const targetDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(targetDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                window.plugins.socialsharing.shareWithOptions({
-                                    message: `Файл: ${fileName}`,
-                                    subject: fileName,
-                                    files: [fileEntry.nativeURL]
-                                }, () => {}, (err) => alert('Ошибка системной отправки: ' + err));
-                            };
-                            writer.onerror = (e) => alert('Ошибка записи: ' + JSON.stringify(e));
-                            writer.write(blobData);
-                        }, (err) => alert('Не удалось начать запись: ' + JSON.stringify(err)));
-                    }, (err) => alert('Не удалось создать временный файл: ' + JSON.stringify(err)));
-                }, (err) => alert('Доступ к кэшу закрыт: ' + JSON.stringify(err)));
-                return;
-            }
+name: Build Android APK
 
-            // 2. Если браузер поддерживает Web Share API
-            const file = new File([blobData], fileName, { type: blobData.type });
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                navigator.share({
-                    files: [file],
-                    title: fileName,
-                    text: 'Выгрузка данных Rock Area'
-                }).catch(e => {
-                    if (e.name !== 'AbortError') alert('Ошибка Web Share: ' + e.message);
-                });
-                return;
-            }
+on:
+  workflow_dispatch:
 
-            // 3. Классическое сохранение в обычном браузере
-            const blobUrl = URL.createObjectURL(blobData);
-            const downloadLink = document.createElement('a');
-            downloadLink.href = blobUrl;
-            downloadLink.download = fileName;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            setTimeout(() => {
-                document.body.removeChild(downloadLink);
-                URL.revokeObjectURL(blobUrl);
-            }, 1000);
-        }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        // 1. Выгрузка в Excel / CSV
-        exportCsvBtn.onclick = function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст! Сделайте замер и сохраните его.');
-                return;
-            }
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-            try {
-                let csvContent = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-                records.forEach((rec, idx) => {
-                    csvContent += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
-                });
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-                const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-                const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                deliverFileToSystem(csvBlob, fileName);
-            } catch (err) {
-                alert('Ошибка при выгрузке таблицы: ' + err.message);
-            }
-        };
+      - name: Install Cordova
+        run: npm install -g cordova
 
-        // 2. Выгрузка в ZIP (фотопак)
-        exportZipBtn.onclick = async function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст! Сделайте замер и сохраните его.');
-                return;
-            }
+      - name: Build Cordova Project
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-            if (typeof JSZip === 'undefined') {
-                alert('Библиотека JSZip ещё загружается...');
-                return;
-            }
+          cordova create app com.div1kik.rockarea "RockArea"
+          cd app
+          rm -rf www/*
 
-            exportZipBtn.style.opacity = '0.5';
-            exportZipBtn.style.pointerEvents = 'none';
+          cp ../index.html www/index.html
+          mkdir -p www/js
 
-            try {
-                const zip = new JSZip();
-                const folderRaw = zip.folder("1_Исходники");
-                const folderMasks = zip.folder("2_Контуры_маски");
+          curl -sL https://docs.opencv.org/4.8.0/opencv.js -o www/js/opencv.js
+          curl -sL https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js -o www/js/jszip.min.js
 
-                records.forEach((rec, idx) => {
-                    const prefix = `${idx + 1}_${rec.name}`;
-                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-                });
+          sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
+          sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-                const zipBlob = await zip.generateAsync({ type: "blob" });
-                const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
-                deliverFileToSystem(zipBlob, fileName);
-            } catch (err) {
-                alert('Ошибка при создании архива: ' + err.message);
-            } finally {
-                exportZipBtn.style.opacity = '1';
-                exportZipBtn.style.pointerEvents = 'auto';
-            }
-        };
+          # Плагины камеры, файловой системы и системного диалога выгрузки
+          cordova plugin add cordova-plugin-camera
+          cordova plugin add cordova-plugin-android-permissions
+          cordova plugin add cordova-plugin-file
+          cordova plugin add es6-promise-plugin
+          cordova plugin add cordova-plugin-x-socialsharing
+
+          cordova platform add android
+
+          MANIFEST="platforms/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i '/<application/i <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+            sed -i '/<application/i <uses-feature android:name="android.hardware.camera" android:required="true" />' "$MANIFEST"
+            sed -i '/<application/i <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' "$MANIFEST"
+            sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' "$MANIFEST"
+            sed -i '/<application/i <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
+            sed -i 's/<application /<application android:requestLegacyExternalStorage="true" /g' "$MANIFEST"
+          fi
+
+          cordova build android --debug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RockArea-Offline-App
+          path: app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
