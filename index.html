@@ -317,6 +317,7 @@
         }
         select:focus, .input-text:focus { border-color: var(--accent-cyan); }
 
+        /* Полноэкранный архив */
         .archive-modal {
             position: fixed;
             inset: 0;
@@ -337,7 +338,7 @@
             padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 10px;
             margin-bottom: 14px;
         }
         .filter-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -356,7 +357,7 @@
         .item-name { font-size: 14px; font-weight: 700; }
         .item-meta { font-size: 11.5px; color: var(--text-secondary); }
         .item-area { font-size: 15px; font-weight: 800; color: var(--accent-mint); margin-top: 2px; }
-        .item-actions { display: flex; align-items: center; gap: 8px; }
+        .item-actions { display: flex; align-items: center; gap: 6px; }
         .item-btn {
             background: #1e293b;
             border: 1px solid var(--card-border);
@@ -370,6 +371,7 @@
             gap: 4px;
         }
 
+        /* Просмотрщик фото */
         .photo-viewer {
             position: fixed;
             inset: 0;
@@ -509,8 +511,16 @@
                     <input type="date" id="filter-date-to" class="input-text">
                 </div>
             </div>
-            <button class="btn btn-green" id="export-excel-period-btn">
-                <span>📊</span> Сохранить таблицу Excel (CSV)
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <button class="btn btn-green" id="export-excel-period-btn">
+                    <span>📊</span> Таблица (.csv)
+                </button>
+                <button class="btn btn-secondary" id="export-zip-period-btn">
+                    <span>📦</span> Фотоархив (.zip)
+                </button>
+            </div>
+            <button class="btn btn-secondary" id="export-html-report-btn" style="width: 100%; margin-top: 4px;">
+                <span>📄</span> Фотопротокол (HTML / PDF)
             </button>
         </div>
 
@@ -524,7 +534,7 @@
         <div class="archive-list" id="archive-list-container"></div>
     </div>
 
-    <!-- Модалка просмотра фото -->
+    <!-- Просмотр фото образца -->
     <div class="photo-viewer" id="photo-viewer">
         <img id="viewer-img-el" class="viewer-img" src="" alt="Фото скола">
         <div class="viewer-controls">
@@ -585,6 +595,8 @@
         const filterDateFrom = document.getElementById('filter-date-from');
         const filterDateTo = document.getElementById('filter-date-to');
         const exportExcelPeriodBtn = document.getElementById('export-excel-period-btn');
+        const exportZipPeriodBtn = document.getElementById('export-zip-period-btn');
+        const exportHtmlReportBtn = document.getElementById('export-html-report-btn');
         const archiveListContainer = document.getElementById('archive-list-container');
         const filteredCount = document.getElementById('filtered-count');
         const clearAllArchiveBtn = document.getElementById('clear-all-archive-btn');
@@ -813,7 +825,7 @@
         }
 
         // =============================================================
-        // РУЧНОЙ РЕЖИМ ЛАССО, ЗУМ И ЛУПА
+        // РУЧНОЕ ЛАССО, ЗУМ И ЛУПА
         // =============================================================
         modeAutoBtn.onclick = () => {
             if (!isManualMode) return;
@@ -1115,7 +1127,6 @@
 
         resetBtn.addEventListener('click', resetToLiveMode);
 
-        // Гарантированное создание фото маски без чёрных кадров
         function generateMaskSnapshot() {
             const offscreen = document.createElement('canvas');
             offscreen.width = WARP_SIZE;
@@ -1190,7 +1201,7 @@
         }
 
         // =============================================================
-        // АРХИВ И СОХРАНЕНИЕ CSV В ПАМЯТЬ СМАРТФОНА
+        // АРХИВ И СОХРАНЕНИЕ
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1240,6 +1251,9 @@
                         <button class="item-btn" onclick="openPhotoViewer(${rec.id})">
                             <span>🖼️</span> Фото
                         </button>
+                        <button class="item-btn" title="Скачать фото маски" onclick="saveSingleSamplePhoto(${rec.id})">
+                            <span>💾</span>
+                        </button>
                         <button class="btn-red" onclick="deleteArchiveRecord(${rec.id})">✕</button>
                     </div>
                 `;
@@ -1266,7 +1280,24 @@
             }
         };
 
-        // Корректный просмотр фото и маски
+        // 1. Скачивание отдельного снимка маски образца
+        window.saveSingleSamplePhoto = function(id) {
+            const rec = records.find(r => r.id === id);
+            if (!rec || !rec.maskImg) return;
+
+            const base64Data = rec.maskImg.replace(/^data:image\/[a-z]+;base64,/, "");
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'image/jpeg' });
+            const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
+
+            saveBlobToDeviceStorage(blob, fileName);
+        };
+
         window.openPhotoViewer = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec) return;
@@ -1289,7 +1320,6 @@
             currentViewingRecord = null;
         };
 
-        // Формирование безупречного CSV (с UTF-8 BOM и разделителем ;)
         function generateCsvStringForArray(recordsArray) {
             let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
             recordsArray.forEach((r, i) => {
@@ -1298,7 +1328,7 @@
             return csv;
         }
 
-        // Прямое сохранение таблицы на устройство без всплывающих шторок
+        // 2. Выгрузка таблицы CSV за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1312,6 +1342,122 @@
             const csvContent = generateCsvStringForArray(filtered);
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
 
+            saveBlobToDeviceStorage(blob, fileName);
+        };
+
+        // 3. Пакетный ZIP-архив за период
+        exportZipPeriodBtn.onclick = async function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
+                return;
+            }
+
+            exportZipPeriodBtn.style.opacity = '0.5';
+            exportZipPeriodBtn.style.pointerEvents = 'none';
+
+            try {
+                const zip = new JSZip();
+                const folderRaw = zip.folder("1_Исходники");
+                const folderMasks = zip.folder("2_Контуры_маски");
+
+                filtered.forEach((rec, idx) => {
+                    const prefix = `${idx + 1}_${rec.name}`;
+                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
+                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
+                });
+
+                const csvData = generateCsvStringForArray(filtered);
+                zip.file("Журнал_испытаний.csv", csvData);
+
+                const fromStr = filterDateFrom.value || 'все';
+                const toStr = filterDateTo.value || 'все';
+                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
+
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                saveBlobToDeviceStorage(zipBlob, fileName);
+            } catch (err) {
+                alert('Ошибка создания ZIP: ' + err.message);
+            } finally {
+                exportZipPeriodBtn.style.opacity = '1';
+                exportZipPeriodBtn.style.pointerEvents = 'auto';
+            }
+        };
+
+        // 4. Формирование HTML-фотопротокола
+        exportHtmlReportBtn.onclick = function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
+                return;
+            }
+
+            const fromStr = filterDateFrom.value || 'все';
+            const toStr = filterDateTo.value || 'все';
+            const fileName = `Протокол_испытаний_${fromStr}_по_${toStr}.html`;
+
+            let htmlDoc = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Протокол планиметрии керна</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 20px; color: #111; background: #fff; }
+  h2 { margin-bottom: 4px; }
+  .meta { color: #555; font-size: 13px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; font-size: 13px; vertical-align: middle; }
+  th { background: #f4f4f4; }
+  .thumb { width: 90px; height: 90px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; display: block; }
+  .area-cell { font-size: 15px; font-weight: bold; color: #059669; }
+  @media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+  <h2>Протокол оптического измерения площади керна</h2>
+  <div class="meta">Период: с ${fromStr} по ${toStr} | Всего замеров: ${filtered.length}</div>
+  <button class="no-print" onclick="window.print()" style="padding: 8px 16px; margin-bottom: 16px; cursor: pointer;">Печать / Сохранить в PDF</button>
+  <table>
+    <thead>
+      <tr>
+        <th>№</th>
+        <th>Шифр</th>
+        <th>S, см²</th>
+        <th>База, мм</th>
+        <th>Дата / Время</th>
+        <th>Исходник</th>
+        <th>Контур скола</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+            filtered.forEach((r, idx) => {
+                htmlDoc += `
+      <tr>
+        <td>${idx + 1}</td>
+        <td><b>${r.name}</b></td>
+        <td class="area-cell">${r.area}</td>
+        <td>${r.baseMm}</td>
+        <td>${r.date} ${r.time}</td>
+        <td><img class="thumb" src="${r.rawImg}" alt="Исходник"></td>
+        <td><img class="thumb" src="${r.maskImg}" alt="Маска"></td>
+      </tr>`;
+            });
+
+            htmlDoc += `
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+            saveBlobToDeviceStorage(blob, fileName);
+        };
+
+        // Сохранение напрямую в рабочую память приложения на накопителе
+        function saveBlobToDeviceStorage(blob, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
@@ -1320,7 +1466,7 @@
                             writer.onwriteend = function() {
                                 fileEntry.file(function(realFile) {
                                     const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Таблица успешно сохранена!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть на телефоне:\nAndroid/data/com.div1kik.rockarea/files/`);
+                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть на телефоне:\nAndroid/data/com.div1kik.rockarea/files/`);
                                 });
                             };
                             writer.write(blob);
@@ -1339,7 +1485,7 @@
                     URL.revokeObjectURL(url);
                 }, 1000);
             }
-        };
+        }
 
         // =============================================================
         // OPENCV АЛГОРИТМЫ
