@@ -41,12 +41,14 @@ jobs:
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-          # Официальные проверенные плагины из стабильного npm-реестра
+          # Официальные плагины
           cordova plugin add cordova-plugin-camera
           cordova plugin add cordova-plugin-android-permissions
           cordova plugin add cordova-plugin-file
           cordova plugin add es6-promise-plugin
           cordova plugin add cordova-plugin-x-socialsharing
+          # Официальный плагин прямой записи в Загрузки через Android MediaStore
+          cordova plugin add cordova-plugin-android-mediastore
 
           cordova platform add android
 
@@ -57,14 +59,8 @@ jobs:
             sed -i '/<application/i <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' "$MANIFEST"
             sed -i '/<application/i <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
             sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' "$MANIFEST"
-            sed -i '/<application/i <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />' "$MANIFEST"
             sed -i 's/<application /<application android:requestLegacyExternalStorage="true" /g' "$MANIFEST"
           fi
-
-          # Разрешение прямого обмена файлами между веб-слоем и системой
-          CONFIG="config.xml"
-          sed -i '/<\/widget>/i <preference name="AndroidInsecureFileModeEnabled" value="true" />' "$CONFIG"
-          sed -i '/<\/widget>/i <allow-navigation href="*" />' "$CONFIG"
 
           cordova build android --debug
 
