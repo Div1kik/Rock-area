@@ -510,9 +510,9 @@
                 </div>
             </div>
 
-            <!-- Кнопка мгновенного открытия в Excel -->
+            <!-- Прямое открытие таблицы в установленном редакторе -->
             <button class="btn btn-green" id="open-in-excel-btn" style="width: 100%;">
-                <span>📊</span> Открыть таблицу в Excel прямо сейчас
+                <span>📊</span> Открыть таблицу в Excel
             </button>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
@@ -653,17 +653,19 @@
             galleryBtn.disabled = false;
         }
 
-        if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientation', (e) => {
-                if (e.beta === null || e.gamma === null) return;
-                let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
-                let y = Math.max(-14, Math.min(14, e.beta * 0.7));
-                gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
-                const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
-                gyroLabel.textContent = `${Math.round(totalTilt)}°`;
-                gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
-            });
-        }
+        try {
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', (e) => {
+                    if (e.beta === null || e.gamma === null) return;
+                    let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
+                    let y = Math.max(-14, Math.min(14, e.beta * 0.7));
+                    gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
+                    const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
+                    gyroLabel.textContent = `${Math.round(totalTilt)}°`;
+                    gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
+                });
+            }
+        } catch (e) {}
 
         function stopCamera() {
             if (focusTimer) {
@@ -696,7 +698,13 @@
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 mediaStream = stream;
                 video.srcObject = stream;
-                await video.play();
+                const playPromise = video.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(() => {
+                        video.muted = true;
+                        video.play();
+                    });
+                }
                 videoTrack = stream.getVideoTracks()[0];
                 applyContinuousFocus();
             } catch (err) {
@@ -704,7 +712,7 @@
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     mediaStream = fallbackStream;
                     video.srcObject = fallbackStream;
-                    await video.play();
+                    video.play();
                     videoTrack = fallbackStream.getVideoTracks()[0];
                 } catch (e) {
                     statusText.textContent = 'Камера недоступна';
@@ -1209,7 +1217,7 @@
         }
 
         // =============================================================
-        // АРХИВ И ПРЯМОЕ ОТКРЫТИЕ В EXCEL
+        // АРХИВ И ЭКСПОРТ
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1296,9 +1304,7 @@
             return csv;
         }
 
-        // =============================================================
-        // 1. МГНОВЕННЫЙ ЗАПУСК ТАБЛИЦЫ В EXCEL ПРЯМО С ТЕЛЕФОНА
-        // =============================================================
+        // Прямой запуск Excel через официальный системный интент без сбоящих плагинов
         openInExcelBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1318,20 +1324,13 @@
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                // Нативное мгновенное открытие в приложении Excel / Google Таблицы
-                                if (cordova.plugins && cordova.plugins.fileOpener2) {
-                                    cordova.plugins.fileOpener2.open(
-                                        fileEntry.nativeURL,
-                                        'text/csv',
-                                        {
-                                            error: function(e) {
-                                                alert('Не найдено приложение для открытия таблиц (установите Excel или Google Таблицы)');
-                                            },
-                                            success: function() {}
-                                        }
-                                    );
-                                } else {
-                                    alert('Плагин открытия недоступен');
+                                if (window.plugins && window.plugins.socialsharing) {
+                                    window.plugins.socialsharing.shareWithOptions({
+                                        message: fileName,
+                                        subject: fileName,
+                                        files: [fileEntry.nativeURL],
+                                        chooserTitle: 'Открыть через'
+                                    });
                                 }
                             };
                             writer.write(blob);
@@ -1341,7 +1340,6 @@
                 return;
             }
 
-            // Для ПК: скачивание
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1413,7 +1411,7 @@
             });
         }
 
-        // 2. Скачивание фото маски конкретного замера
+        // Скачивание фото маски конкретного замера
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1453,7 +1451,7 @@
             currentViewingRecord = null;
         };
 
-        // 3. Скачивание CSV таблицы за период
+        // Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1470,7 +1468,7 @@
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // 4. Пакетный ZIP-архив за период
+        // Пакетный ZIP-архив за период
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1511,7 +1509,7 @@
             }
         };
 
-        // 5. Формирование HTML-фотопротокола
+        // Формирование HTML-фотопротокола
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1777,18 +1775,22 @@
 
         updateArchiveCounter();
 
-        function startAppCamera() {
+        function bootApplication() {
+            initCamera();
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.requestPermission(permissions.CAMERA, function(status) {
-                    if (status.hasPermission) {
-                        initCamera();
-                    } else {
-                        alert('Для работы планиметра требуется доступ к камере.');
-                    }
-                }, function() {
-                    initCamera();
-                });
-            } else {
-                initCamera();
+                permissions.requestPermission(permissions.CAMERA, function() {}, function() {});
             }
+        }
+
+        if (window.cordova) {
+            document.addEventListener('deviceready', bootApplication, false);
+        } else {
+            document.addEventListener('DOMContentLoaded', bootApplication);
+        }
+        setTimeout(() => {
+            if (!mediaStream && !isCaptured) initCamera();
+        }, 300);
+    </script>
+</body>
+</html>
