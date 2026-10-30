@@ -510,16 +510,20 @@
                 </div>
             </div>
 
-            <!-- Только нужные кнопки, без лишних -->
+            <!-- Прямое открытие таблицы в установленном редакторе -->
+            <button class="btn btn-green" id="open-in-excel-btn" style="width: 100%;">
+                <span>📊</span> Открыть таблицу в Excel
+            </button>
+
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <button class="btn btn-green" id="export-excel-period-btn">
+                <button class="btn btn-secondary" id="export-excel-period-btn">
                     <span>💾</span> Скачать CSV
                 </button>
                 <button class="btn btn-secondary" id="export-zip-period-btn">
                     <span>📦</span> Фотоархив ZIP
                 </button>
             </div>
-            <button class="btn btn-secondary" id="export-html-report-btn" style="width: 100%; margin-top: 4px;">
+            <button class="btn btn-secondary" id="export-html-report-btn" style="width: 100%;">
                 <span>📄</span> Фотопротокол (HTML / PDF)
             </button>
         </div>
@@ -594,6 +598,7 @@
         const headerArchiveCount = document.getElementById('header-archive-count');
         const filterDateFrom = document.getElementById('filter-date-from');
         const filterDateTo = document.getElementById('filter-date-to');
+        const openInExcelBtn = document.getElementById('open-in-excel-btn');
         const exportExcelPeriodBtn = document.getElementById('export-excel-period-btn');
         const exportZipPeriodBtn = document.getElementById('export-zip-period-btn');
         const exportHtmlReportBtn = document.getElementById('export-html-report-btn');
@@ -663,12 +668,15 @@
         } catch (e) {}
 
         function stopCamera() {
-            if (focusTimer) clearTimeout(focusTimer);
+            if (focusTimer) {
+                clearTimeout(focusTimer);
+                focusTimer = null;
+            }
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                videoTrack = null;
             }
-            mediaStream = null;
-            videoTrack = null;
             video.srcObject = null;
         }
 
@@ -676,41 +684,39 @@
             if (isCaptured) return;
             stopCamera();
 
-            video.setAttribute('autoplay', '');
-            video.setAttribute('muted', '');
-            video.setAttribute('playsinline', '');
+            const constraints = {
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30 }
+                },
+                audio: false
+            };
 
-            let stream = null;
             try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, 
-                    audio: false 
-                });
-            } catch (err1) {
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-                } catch (err2) {
-                    try {
-                        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    } catch (err3) {
-                        statusText.textContent = 'Камера отклонена';
-                        return;
-                    }
-                }
-            }
-
-            if (stream) {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 mediaStream = stream;
                 video.srcObject = stream;
-                videoTrack = stream.getVideoTracks()[0];
-                
-                let playPromise = video.play();
+                const playPromise = video.play();
                 if (playPromise !== undefined) {
                     playPromise.catch(() => {
                         video.muted = true;
+                        video.play();
                     });
                 }
+                videoTrack = stream.getVideoTracks()[0];
                 applyContinuousFocus();
+            } catch (err) {
+                try {
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    mediaStream = fallbackStream;
+                    video.srcObject = fallbackStream;
+                    video.play();
+                    videoTrack = fallbackStream.getVideoTracks()[0];
+                } catch (e) {
+                    statusText.textContent = 'Камера недоступна';
+                }
             }
         }
 
@@ -719,7 +725,9 @@
             try {
                 const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
                 if (caps.focusMode && caps.focusMode.includes('continuous')) {
-                    await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                    await videoTrack.applyConstraints({
+                        advanced: [{ focusMode: 'continuous' }]
+                    });
                 }
             } catch (e) {}
         }
@@ -798,6 +806,7 @@
             savePanel.style.display = 'flex';
             contourModeGroup.style.display = 'grid';
             sampleNameInput.value = `Керн-${records.length + 1}`;
+            if (video) video.pause();
         }
 
         function resetToLiveMode() {
@@ -824,7 +833,11 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            initCamera();
+            if (video.srcObject) {
+                video.play();
+            } else {
+                initCamera();
+            }
         }
 
         // =============================================================
@@ -1289,11 +1302,61 @@
             }
         };
 
-        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В ПАПКУ DOCUMENTS С ОРИГИНАЛЬНЫМ BLOB
+        // Прямое открытие таблицы в Excel
+        openInExcelBtn.onclick = function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
+                return;
+            }
+
+            const fromStr = filterDateFrom.value || 'все';
+            const toStr = filterDateTo.value || 'все';
+            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
+            const csvContent = generateCsvStringForArray(filtered);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+
+            if (window.cordova && cordova.file) {
+                const cacheDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(cacheDir, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(writer) {
+                            writer.onwriteend = function() {
+                                if (window.plugins && window.plugins.socialsharing) {
+                                    window.plugins.socialsharing.shareWithOptions({
+                                        message: fileName,
+                                        subject: fileName,
+                                        files: [fileEntry.nativeURL],
+                                        chooserTitle: 'Открыть через'
+                                    });
+                                }
+                            };
+                            writer.write(blob);
+                        });
+                    });
+                });
+                return;
+            }
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 1000);
+        };
+
+        // ОРИГИНАЛЬНЫЙ РАБОЧИЙ МЕТОД СОХРАНЕНИЯ В DOCUMENTS
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
-                
+                const targetDirUri = cordova.file.externalRootDirectory 
+                    ? (cordova.file.externalRootDirectory + 'Documents/') 
+                    : (cordova.file.externalDataDirectory || cordova.file.dataDirectory);
+
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
@@ -1304,15 +1367,15 @@
                                 });
                             };
                             writer.onerror = function() {
-                                alert('Ошибка записи файла.');
+                                saveToFallbackStorage(blob, fileName);
                             };
                             writer.write(blob);
                         });
                     }, function() {
-                        alert('Ошибка создания файла.');
+                        saveToFallbackStorage(blob, fileName);
                     });
                 }, function() {
-                    alert('Ошибка доступа к Документам.');
+                    saveToFallbackStorage(blob, fileName);
                 });
                 return;
             }
@@ -1329,6 +1392,23 @@
             }, 1000);
         }
 
+        function saveToFallbackStorage(blob, fileName) {
+            const fallbackUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
+            window.resolveLocalFileSystemURL(fallbackUri, function(dirEntry) {
+                dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                    fileEntry.createWriter(function(writer) {
+                        writer.onwriteend = function() {
+                            fileEntry.file(function(realFile) {
+                                const sizeKb = (realFile.size / 1024).toFixed(1);
+                                alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ`);
+                            });
+                        };
+                        writer.write(blob);
+                    });
+                });
+            });
+        }
+
         // Скачивание отдельного снимка маски
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
@@ -1341,8 +1421,9 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
-            
             const blob = new Blob([byteArray], { type: 'image/jpeg' });
+            const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
+
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
@@ -1387,9 +1468,9 @@
             const fromStr = filterDateFrom.value || 'все';
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
-            
             const csvContent = generateCsvStringForArray(filtered);
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
@@ -1647,7 +1728,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
@@ -1700,32 +1781,22 @@
 
         updateArchiveCounter();
 
-        function requestAndStartCamera() {
+        function bootApplication() {
+            initCamera();
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.checkPermission(permissions.CAMERA, function(status) {
-                    if (status.hasPermission) {
-                        initCamera();
-                    } else {
-                        permissions.requestPermission(permissions.CAMERA, function() {
-                            initCamera();
-                        }, function() {
-                            initCamera();
-                        });
-                    }
-                }, function() {
-                    initCamera();
-                });
-            } else {
-                initCamera();
+                permissions.requestPermission(permissions.CAMERA, function() {}, function() {});
             }
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', requestAndStartCamera, false);
+            document.addEventListener('deviceready', bootApplication, false);
         } else {
-            document.addEventListener('DOMContentLoaded', requestAndStartCamera);
+            document.addEventListener('DOMContentLoaded', bootApplication);
         }
+        setTimeout(() => {
+            if (!mediaStream && !isCaptured) initCamera();
+        }, 300);
     </script>
 </body>
 </html>
