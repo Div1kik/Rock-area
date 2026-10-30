@@ -647,19 +647,17 @@
             galleryBtn.disabled = false;
         }
 
-        try {
-            if (window.DeviceOrientationEvent) {
-                window.addEventListener('deviceorientation', (e) => {
-                    if (e.beta === null || e.gamma === null) return;
-                    let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
-                    let y = Math.max(-14, Math.min(14, e.beta * 0.7));
-                    gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
-                    const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
-                    gyroLabel.textContent = `${Math.round(totalTilt)}°`;
-                    gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
-                });
-            }
-        } catch (e) {}
+        if (window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', (e) => {
+                if (e.beta === null || e.gamma === null) return;
+                let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
+                let y = Math.max(-14, Math.min(14, e.beta * 0.7));
+                gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
+                const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
+                gyroLabel.textContent = `${Math.round(totalTilt)}°`;
+                gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
+            });
+        }
 
         function stopCamera() {
             if (focusTimer) {
@@ -676,37 +674,33 @@
 
         async function initCamera() {
             if (isCaptured) return;
-            stopCamera();
+            const constraints = {
+                video: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 }
+                },
+                audio: false
+            };
 
-            const constraintsList = [
-                { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-                { video: { facingMode: "environment" }, audio: false },
-                { video: true, audio: false }
-            ];
-
-            for (let constraints of constraintsList) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                mediaStream = stream;
+                video.srcObject = stream;
+                await video.play();
+                videoTrack = stream.getVideoTracks()[0];
+                applyContinuousFocus();
+            } catch (err) {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    mediaStream = stream;
-                    video.srcObject = stream;
-                    
-                    video.setAttribute('autoplay', '');
-                    video.setAttribute('muted', '');
-                    video.setAttribute('playsinline', '');
-
-                    const playPromise = video.play();
-                    if (playPromise !== undefined) {
-                        playPromise.catch(() => {
-                            video.muted = true;
-                            video.play();
-                        });
-                    }
-                    videoTrack = stream.getVideoTracks()[0];
-                    applyContinuousFocus();
-                    return;
-                } catch (e) {}
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    mediaStream = fallbackStream;
+                    video.srcObject = fallbackStream;
+                    await video.play();
+                    videoTrack = fallbackStream.getVideoTracks()[0];
+                } catch (e) {
+                    statusText.textContent = 'Камера недоступна';
+                }
             }
-            statusText.textContent = 'Камера недоступна';
         }
 
         async function applyContinuousFocus() {
@@ -795,6 +789,7 @@
             savePanel.style.display = 'flex';
             contourModeGroup.style.display = 'grid';
             sampleNameInput.value = `Керн-${records.length + 1}`;
+            if (video) video.pause();
         }
 
         function resetToLiveMode() {
@@ -821,7 +816,11 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            initCamera();
+            if (video.srcObject) {
+                video.play();
+            } else {
+                initCamera();
+            }
         }
 
         // =============================================================
@@ -1077,25 +1076,27 @@
         }
 
         // =============================================================
-        // ОБРАБОТКА КАДРА (ТОЧНЫЙ СНИМОК И АВТОПОРОГ)
+        // ОБРАБОТКА КАДРА (ЧЕТКИЙ ЗАХВАТ ДО ПАУЗЫ ВИДЕО)
         // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
-            const h = video.videoHeight > 0 ? video.videoHeight : 720;
-            snapCanvas.width = w;
-            snapCanvas.height = h;
+            snapCanvas.width = video.videoWidth || 1280;
+            snapCanvas.height = video.videoHeight || 720;
             const ctx = snapCanvas.getContext('2d');
             
-            ctx.drawImage(video, 0, 0, w, h);
+            // 1. Обязательно считываем пиксели ДО остановки потока видео!
+            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            showResultMode();
+            // 2. Обрабатываем OpenCV
             processFrame(lastRawMat, null);
+            
+            // 3. Только потом прячем камеру
+            showResultMode();
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1112,16 +1113,17 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = img.width;
-                    tempCanvas.height = img.height;
+                    // Обязательно берём реальные размеры загруженной картинки
+                    tempCanvas.width = img.naturalWidth || img.width;
+                    tempCanvas.height = img.naturalHeight || img.height;
                     const ctx = tempCanvas.getContext('2d');
                     ctx.drawImage(img, 0, 0);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    showResultMode();
                     processFrame(lastRawMat, null);
+                    showResultMode();
                 };
                 img.src = event.target.result;
             };
@@ -1283,36 +1285,33 @@
             }
         };
 
-        // ТОТ САМЫЙ ЭТАЛОННЫЙ МЕТОД СОХРАНЕНИЯ В DOCUMENTS
+        function generateCsvStringForArray(recordsArray) {
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
+            recordsArray.forEach((r, i) => {
+                csv += `${i + 1};${r.name};${r.area};${r.baseMm};${r.mode};${r.date};${r.time};${r.threshold}\n`;
+            });
+            return csv;
+        }
+
+        // ЖЁСТКАЯ ЗАПИСЬ СТРОГО В ПАПКУ "DOCUMENTS" (Документы)
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalRootDirectory 
-                    ? (cordova.file.externalRootDirectory + 'Documents/') 
-                    : (cordova.file.externalDataDirectory || cordova.file.dataDirectory);
-
+                const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
+                
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                fileEntry.file(function(realFile) {
-                                    const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён на телефон!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
-                                });
-                            };
-                            writer.onerror = function() {
-                                saveToFallbackStorage(blob, fileName);
+                                alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\n\nПапка: Documents (Документы)`);
                             };
                             writer.write(blob);
                         });
-                    }, function() {
-                        saveToFallbackStorage(blob, fileName);
                     });
-                }, function() {
-                    saveToFallbackStorage(blob, fileName);
                 });
                 return;
             }
 
+            // Fallback для работы приложения из браузера на ПК
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1323,23 +1322,6 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
             }, 1000);
-        }
-
-        function saveToFallbackStorage(blob, fileName) {
-            const fallbackUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-            window.resolveLocalFileSystemURL(fallbackUri, function(dirEntry) {
-                dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                    fileEntry.createWriter(function(writer) {
-                        writer.onwriteend = function() {
-                            fileEntry.file(function(realFile) {
-                                const sizeKb = (realFile.size / 1024).toFixed(1);
-                                alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ`);
-                            });
-                        };
-                        writer.write(blob);
-                    });
-                });
-            });
         }
 
         // Скачивание отдельного снимка маски
@@ -1381,14 +1363,6 @@
             photoViewer.style.display = 'none';
             currentViewingRecord = null;
         };
-
-        function generateCsvStringForArray(recordsArray) {
-            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-            recordsArray.forEach((r, i) => {
-                csv += `${i + 1};${r.name};${r.area};${r.baseMm};${r.mode};${r.date};${r.time};${r.threshold}\n`;
-            });
-            return csv;
-        }
 
         // Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
@@ -1604,7 +1578,7 @@
             let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-            cv.Canny(blur, edged, 40, 140);
+            cv.Canny(blur, edged, 50, 150);
 
             let quad = null;
             const mode = targetMode.value;
@@ -1714,22 +1688,14 @@
 
         updateArchiveCounter();
 
-        function bootApplication() {
+        function startAppCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.checkPermission(permissions.CAMERA, function(status) {
+                permissions.requestPermission(permissions.CAMERA, function(status) {
                     if (status.hasPermission) {
                         initCamera();
                     } else {
-                        permissions.requestPermission(permissions.CAMERA, function(status) {
-                            if (status.hasPermission) {
-                                initCamera();
-                            } else {
-                                alert('Для работы планиметра требуется разрешение на камеру.');
-                            }
-                        }, function() {
-                            initCamera();
-                        });
+                        alert('Для работы планиметра требуется доступ к камере.');
                     }
                 }, function() {
                     initCamera();
@@ -1740,9 +1706,9 @@
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', bootApplication, false);
+            document.addEventListener('deviceready', startAppCamera, false);
         } else {
-            document.addEventListener('DOMContentLoaded', bootApplication);
+            document.addEventListener('DOMContentLoaded', startAppCamera);
         }
     </script>
 </body>
