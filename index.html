@@ -931,43 +931,35 @@
             }
         });
 
-        // =============================================================
-        // НАДЁЖНОЕ СОХРАНЕНИЕ В ПАМЯТЬ ЧЕРЕЗ ФИЗИЧЕСКУЮ ЗАПИСЬ + SAVE-DIALOG
+                // =============================================================
+        // НАДЁЖНОЕ СОХРАНЕНИЕ В ПАМЯТЬ ЧЕРЕЗ SAVE-DIALOG
         // =============================================================
         function saveBinaryArrayBuffer(arrayBuffer, fileName, mimeType) {
-            // 1. Для Android Cordova APK
-            if (window.cordova && cordova.file && cordova.plugins && cordova.plugins.saveDialog) {
-                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                // Файл записан физически с реальным весом. Вызываем проводник Android:
-                                cordova.plugins.saveDialog.saveFile(
-                                    fileEntry.nativeURL,
-                                    fileName,
-                                    mimeType,
-                                    function(res) {
-                                        alert(`✓ Файл успешно сохранён на устройство:\n${fileName}`);
-                                    },
-                                    function(err) {
-                                        if (err !== 'canceled') {
-                                            alert('Ошибка сохранения: ' + JSON.stringify(err));
-                                        }
-                                    }
-                                );
-                            };
-                            writer.onerror = (e) => alert('Ошибка записи байтов: ' + JSON.stringify(e));
-                            // Пишем чистый ArrayBuffer — это гарантирует правильный размер
-                            writer.write(arrayBuffer);
-                        });
-                    }, (err) => alert('Не удалось создать временный файл: ' + JSON.stringify(err)));
-                }, (err) => alert('Ошибка доступа: ' + JSON.stringify(err)));
+            const blob = new Blob([arrayBuffer], { type: mimeType });
+
+            // Для Android APK: читаем байты в памяти целиком перед передачей в диалог
+            if (window.cordova && cordova.plugins && cordova.plugins.saveDialog) {
+                const reader = new FileReader();
+                reader.onloadend = function() {
+                    cordova.plugins.saveDialog.saveFile(
+                        reader.result,
+                        fileName,
+                        mimeType,
+                        function() {
+                            alert(`✓ Файл записан на устройство:\n${fileName}`);
+                        },
+                        function(err) {
+                            if (err !== 'canceled') {
+                                alert('Ошибка сохранения: ' + JSON.stringify(err));
+                            }
+                        }
+                    );
+                };
+                reader.readAsDataURL(blob);
                 return;
             }
 
-            // 2. Десктопный браузер (fallback)
-            const blob = new Blob([arrayBuffer], { type: mimeType });
+            // Для браузера на ПК
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = blobUrl;
@@ -979,6 +971,7 @@
                 URL.revokeObjectURL(blobUrl);
             }, 1000);
         }
+
 
         // 1. Выгрузка CSV
         exportCsvBtn.onclick = function() {
