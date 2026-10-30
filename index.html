@@ -685,10 +685,10 @@
             }
         });
 
-                // =============================================================
-        // СОХРАНЕНИЕ В ПАПКУ "DOWNLOAD" (ИСПРАВЛЕННАЯ ЗАПИСЬ)
+                        // =============================================================
+        // СОХРАНЕНИЕ С ВЫБОРОМ ПАПКИ (БЕЗ ИЗМЕНЕНИЯ КНОПКИ "ПОДЕЛИТЬСЯ")
         // =============================================================
-        function saveDirectlyToStorage(base64DataWithPrefix, fileName) {
+        function saveFileWithFolderChoice(base64DataWithPrefix, fileName) {
             const parts = base64DataWithPrefix.split(',');
             const byteString = atob(parts[1]);
             const mimeType = parts[0].split(':')[1].split(';')[0];
@@ -697,56 +697,64 @@
             for (let i = 0; i < byteString.length; i++) {
                 ia[i] = byteString.charCodeAt(i);
             }
-            // Создаем нативный Blob — именно его требует Cordova FileWriter
             const fileBlob = new Blob([ab], { type: mimeType });
 
-            // 1. Android APK (Cordova)
-            if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalRootDirectory 
-                    ? (cordova.file.externalRootDirectory + 'Download/') 
-                    : cordova.file.dataDirectory;
-
-                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
+            // 1. Android APK: пишем во временный файл и вызываем системный проводник "Сохранить в папку"
+            if (window.cordova && cordova.file && window.plugins && window.plugins.socialsharing) {
+                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                alert(`✓ Файл сохранён в папку "Загрузки":\n${fileName}`);
+                                window.plugins.socialsharing.shareWithOptions({
+                                    message: `Сохранение файла: ${fileName}`,
+                                    subject: fileName,
+                                    files: [fileEntry.nativeURL],
+                                    chooserTitle: 'Сохранить в папку на устройстве'
+                                }, () => {}, (err) => alert('Ошибка проводника: ' + JSON.stringify(err)));
                             };
-                            writer.onerror = function(err) {
-                                // Если файл фактически уже записан, игнорируем ложную ошибку
-                                console.warn('Write event notice:', err);
-                            };
-                            // Передаем Blob, а не сырой ArrayBuffer
+                            writer.onerror = (e) => alert('Ошибка записи временного файла: ' + JSON.stringify(e));
                             writer.write(fileBlob);
-                        }, function(err) {
-                            alert('Ошибка инициализации записи: ' + JSON.stringify(err));
                         });
-                    }, function(err) {
-                        alert('Не удалось создать файл: ' + JSON.stringify(err));
-                    });
-                }, function(err) {
-                    alert('Нет доступа к папке Download: ' + JSON.stringify(err));
-                });
+                    }, (err) => alert('Не удалось создать файл: ' + JSON.stringify(err)));
+                }, (err) => alert('Ошибка доступа: ' + JSON.stringify(err)));
                 return;
             }
 
-            // 2. Обычный браузер (fallback)
-            try {
-                const blobUrl = URL.createObjectURL(fileBlob);
-                const a = document.createElement('a');
-                a.href = blobUrl;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(blobUrl);
-                }, 1000);
-            } catch (e) {
-                alert('Ошибка скачивания: ' + e.message);
+            // 2. Десктопный браузер (штатный выбор папки)
+            if (window.showSaveFilePicker) {
+                (async () => {
+                    try {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: fileName,
+                            types: [{
+                                description: 'Файл отчета',
+                                accept: { [mimeType]: ['.' + fileName.split('.').pop()] }
+                            }]
+                        });
+                        const writable = await handle.createWritable();
+                        await writable.write(fileBlob);
+                        await writable.close();
+                        alert(`✓ Файл успешно сохранён:\n${fileName}`);
+                    } catch (err) {
+                        if (err.name !== 'AbortError') alert('Ошибка: ' + err.message);
+                    }
+                })();
+                return;
             }
-        }
 
+            // 3. Резервный браузерный способ
+            const blobUrl = URL.createObjectURL(fileBlob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+            }, 1000);
+        }
 
         // Вспомогательная функция формирования CSV-строки
         function generateCsvString() {
@@ -757,7 +765,7 @@
             return csv;
         }
 
-        // 1. Сохранение CSV в Загрузки
+        // 1. Сохранение CSV (вызывает выбор папки)
         exportCsvBtn.onclick = function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -767,13 +775,13 @@
                 const csvContent = generateCsvString();
                 const base64Csv = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csvContent)));
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                saveDirectlyToStorage(base64Csv, fileName);
+                saveFileWithFolderChoice(base64Csv, fileName);
             } catch (err) {
-                alert('Ошибка: ' + err.message);
+                alert('Ошибка CSV: ' + err.message);
             }
         };
 
-        // 2. Сохранение ZIP-фотопака в Загрузки
+        // 2. Сохранение ZIP (вызывает выбор папки)
         exportZipBtn.onclick = async function() {
             if (!records || records.length === 0) {
                 alert('Журнал смены пуст!');
@@ -804,7 +812,7 @@
                 const base64DataUri = 'data:application/zip;base64,' + zipBase64;
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
 
-                saveDirectlyToStorage(base64DataUri, fileName);
+                saveFileWithFolderChoice(base64DataUri, fileName);
             } catch (err) {
                 alert('Ошибка создания архива: ' + err.message);
             } finally {
@@ -812,6 +820,7 @@
                 exportZipBtn.style.pointerEvents = 'auto';
             }
         };
+
 
                 // 3. Отдельная кнопка «Поделиться отчётом» через системную шторку Android
         shareReportBtn.onclick = function() {
