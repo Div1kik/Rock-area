@@ -1288,52 +1288,36 @@
             }
         };
 
-        // =============================================================
-        // УНИВЕРСАЛЬНАЯ ЗАПИСЬ В DOCUMENTS БЕЗ ПУСТЫХ ФАЙЛОВ И ОШИБОК
-        // =============================================================
-        function saveDataDirectlyToDevice(data, fileName) {
+        // ЕДИНАЯ НАДЁЖНАЯ ФУНКЦИЯ СОХРАНЕНИЯ В DOCUMENTS
+        function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
-                
-                // Функция прямой записи байтов
-                const performWrite = (bufferToWrite) => {
-                    window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
-                        dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                            fileEntry.createWriter(function(writer) {
-                                writer.onwriteend = function() {
-                                    fileEntry.file(function(realFile) {
-                                        const sizeKb = (realFile.size / 1024).toFixed(1);
-                                        alert(`✓ Файл сохранён на телефон!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
-                                    });
-                                };
-                                writer.onerror = function(e) {
-                                    alert('Ошибка записи файла: ' + e.toString());
-                                };
-                                writer.write(bufferToWrite);
-                            });
-                        }, function(err) {
-                            alert('Ошибка создания файла. Код: ' + err.code);
+                const targetDirUri = cordova.file.externalRootDirectory 
+                    ? (cordova.file.externalRootDirectory + 'Documents/') 
+                    : (cordova.file.externalDataDirectory || cordova.file.dataDirectory);
+
+                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(writer) {
+                            writer.onwriteend = function() {
+                                fileEntry.file(function(realFile) {
+                                    const sizeKb = (realFile.size / 1024).toFixed(1);
+                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
+                                });
+                            };
+                            writer.onerror = function(err) {
+                                alert('Ошибка записи: ' + JSON.stringify(err));
+                            };
+                            writer.write(blob);
                         });
                     }, function(err) {
-                        alert('Ошибка доступа к папке Documents. Код: ' + err.code);
+                        alert('Ошибка создания файла: ' + JSON.stringify(err));
                     });
-                };
-
-                // Если передан Blob (например от архиватора или текста), безопасно читаем его в ArrayBuffer
-                if (data instanceof Blob) {
-                    const reader = new FileReader();
-                    reader.onloadend = function() {
-                        performWrite(reader.result);
-                    };
-                    reader.readAsArrayBuffer(data);
-                } else {
-                    performWrite(data);
-                }
+                }, function(err) {
+                    alert('Ошибка доступа к папке: ' + JSON.stringify(err));
+                });
                 return;
             }
 
-            // Fallback для десктопа
-            let blob = data instanceof Blob ? data : new Blob([data]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1346,7 +1330,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски (работает 100% стабильно)
+        // Скачивание отдельного снимка маски (рабочий эталон)
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1358,9 +1342,10 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'image/jpeg' });
             const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
 
-            saveDataDirectlyToDevice(byteArray.buffer, fileName);
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1393,7 +1378,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы за период
+        // 1. Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1405,12 +1390,12 @@
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
-            
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-            saveDataDirectlyToDevice(blob, fileName);
+
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив за период
+        // 2. Пакетный ZIP-архив за период
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1442,7 +1427,7 @@
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
                 const zipBlob = await zip.generateAsync({ type: "blob" });
-                saveDataDirectlyToDevice(zipBlob, fileName);
+                saveBlobDirectlyToDevice(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1451,7 +1436,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола
+        // 3. Формирование HTML-фотопротокола
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1518,7 +1503,7 @@
 </html>`;
 
             const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
-            saveDataDirectlyToDevice(blob, fileName);
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
         // =============================================================
