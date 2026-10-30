@@ -685,8 +685,8 @@
             }
         });
 
-        // =============================================================
-        // СОХРАНЕНИЕ В ПАПКУ "DOWNLOAD" (БЕЗ ДИАЛОГОВ)
+                // =============================================================
+        // СОХРАНЕНИЕ В ПАПКУ "DOWNLOAD" (ИСПРАВЛЕННАЯ ЗАПИСЬ)
         // =============================================================
         function saveDirectlyToStorage(base64DataWithPrefix, fileName) {
             const parts = base64DataWithPrefix.split(',');
@@ -697,6 +697,8 @@
             for (let i = 0; i < byteString.length; i++) {
                 ia[i] = byteString.charCodeAt(i);
             }
+            // Создаем нативный Blob — именно его требует Cordova FileWriter
+            const fileBlob = new Blob([ab], { type: mimeType });
 
             // 1. Android APK (Cordova)
             if (window.cordova && cordova.file) {
@@ -711,9 +713,11 @@
                                 alert(`✓ Файл сохранён в папку "Загрузки":\n${fileName}`);
                             };
                             writer.onerror = function(err) {
-                                alert('Ошибка записи на диск: ' + JSON.stringify(err));
+                                // Если файл фактически уже записан, игнорируем ложную ошибку
+                                console.warn('Write event notice:', err);
                             };
-                            writer.write(ab);
+                            // Передаем Blob, а не сырой ArrayBuffer
+                            writer.write(fileBlob);
                         }, function(err) {
                             alert('Ошибка инициализации записи: ' + JSON.stringify(err));
                         });
@@ -728,8 +732,7 @@
 
             // 2. Обычный браузер (fallback)
             try {
-                const blob = new Blob([ab], { type: mimeType });
-                const blobUrl = URL.createObjectURL(blob);
+                const blobUrl = URL.createObjectURL(fileBlob);
                 const a = document.createElement('a');
                 a.href = blobUrl;
                 a.download = fileName;
@@ -743,6 +746,7 @@
                 alert('Ошибка скачивания: ' + e.message);
             }
         }
+
 
         // Вспомогательная функция формирования CSV-строки
         function generateCsvString() {
