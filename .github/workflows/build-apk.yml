@@ -41,13 +41,12 @@ jobs:
           sed -i 's|https://docs.opencv.org/4.8.0/opencv.js|js/opencv.js|g' www/index.html
           sed -i 's|https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js|js/jszip.min.js|g' www/index.html
 
-          # Нативные плагины камеры, проводника сохранения и отправки
+          # Только проверенные официальные плагины
           cordova plugin add cordova-plugin-camera
           cordova plugin add cordova-plugin-android-permissions
           cordova plugin add cordova-plugin-file
           cordova plugin add es6-promise-plugin
           cordova plugin add cordova-plugin-x-socialsharing
-          cordova plugin add cordova-plugin-blob-saver
 
           cordova platform add android
 
@@ -58,6 +57,7 @@ jobs:
             sed -i '/<application/i <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />' "$MANIFEST"
             sed -i '/<application/i <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' "$MANIFEST"
             sed -i '/<application/i <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
+            sed -i 's/<application /<application android:requestLegacyExternalStorage="true" /g' "$MANIFEST"
           fi
 
           cordova build android --debug
