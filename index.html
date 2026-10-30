@@ -510,20 +510,15 @@
                 </div>
             </div>
 
-            <!-- Прямое открытие таблицы в установленном редакторе -->
-            <button class="btn btn-green" id="open-in-excel-btn" style="width: 100%;">
-                <span>📊</span> Открыть таблицу в Excel
-            </button>
-
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                <button class="btn btn-secondary" id="export-excel-period-btn">
+                <button class="btn btn-green" id="export-excel-period-btn">
                     <span>💾</span> Скачать CSV
                 </button>
                 <button class="btn btn-secondary" id="export-zip-period-btn">
                     <span>📦</span> Фотоархив ZIP
                 </button>
             </div>
-            <button class="btn btn-secondary" id="export-html-report-btn" style="width: 100%;">
+            <button class="btn btn-secondary" id="export-html-report-btn" style="width: 100%; margin-top: 4px;">
                 <span>📄</span> Фотопротокол (HTML / PDF)
             </button>
         </div>
@@ -598,7 +593,6 @@
         const headerArchiveCount = document.getElementById('header-archive-count');
         const filterDateFrom = document.getElementById('filter-date-from');
         const filterDateTo = document.getElementById('filter-date-to');
-        const openInExcelBtn = document.getElementById('open-in-excel-btn');
         const exportExcelPeriodBtn = document.getElementById('export-excel-period-btn');
         const exportZipPeriodBtn = document.getElementById('export-zip-period-btn');
         const exportHtmlReportBtn = document.getElementById('export-html-report-btn');
@@ -698,6 +692,11 @@
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 mediaStream = stream;
                 video.srcObject = stream;
+                
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+                video.setAttribute('playsinline', '');
+
                 const playPromise = video.play();
                 if (playPromise !== undefined) {
                     playPromise.catch(() => {
@@ -712,6 +711,9 @@
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     mediaStream = fallbackStream;
                     video.srcObject = fallbackStream;
+                    video.setAttribute('autoplay', '');
+                    video.setAttribute('muted', '');
+                    video.setAttribute('playsinline', '');
                     video.play();
                     videoTrack = fallbackStream.getVideoTracks()[0];
                 } catch (e) {
@@ -833,11 +835,7 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            if (video.srcObject) {
-                video.play();
-            } else {
-                initCamera();
-            }
+            initCamera();
         }
 
         // =============================================================
@@ -1099,19 +1097,16 @@
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
-            const h = video.videoHeight > 0 ? video.videoHeight : 720;
-            snapCanvas.width = w;
-            snapCanvas.height = h;
+            snapCanvas.width = video.videoWidth || 1280;
+            snapCanvas.height = video.videoHeight || 720;
             const ctx = snapCanvas.getContext('2d');
-            
-            ctx.drawImage(video, 0, 0, w, h);
+            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            processFrame(lastRawMat, null);
             showResultMode();
+            processFrame(lastRawMat, null);
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1128,19 +1123,16 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    const natW = img.naturalWidth || img.width || 1000;
-                    const natH = img.naturalHeight || img.height || 1000;
-                    
-                    tempCanvas.width = natW;
-                    tempCanvas.height = natH;
+                    tempCanvas.width = img.width;
+                    tempCanvas.height = img.height;
                     const ctx = tempCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, natW, natH);
+                    ctx.drawImage(img, 0, 0);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    processFrame(lastRawMat, null);
                     showResultMode();
+                    processFrame(lastRawMat, null);
                 };
                 img.src = event.target.result;
             };
@@ -1223,7 +1215,7 @@
         }
 
         // =============================================================
-        // АРХИВ И СОХРАНЕНИЕ
+        // АРХИВ И ЭКСПОРТ (ВОССТАНОВЛЕННЫЙ ОРИГИНАЛЬНЫЙ МЕТОД BLOB)
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1302,55 +1294,7 @@
             }
         };
 
-        // Прямое открытие таблицы в Excel
-        openInExcelBtn.onclick = function() {
-            const filtered = getFilteredRecords();
-            if (filtered.length === 0) {
-                alert('Нет замеров за выбранный период!');
-                return;
-            }
-
-            const fromStr = filterDateFrom.value || 'все';
-            const toStr = filterDateTo.value || 'все';
-            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
-            const csvContent = generateCsvStringForArray(filtered);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-
-            if (window.cordova && cordova.file) {
-                const cacheDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(cacheDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                if (window.plugins && window.plugins.socialsharing) {
-                                    window.plugins.socialsharing.shareWithOptions({
-                                        message: fileName,
-                                        subject: fileName,
-                                        files: [fileEntry.nativeURL],
-                                        chooserTitle: 'Открыть через'
-                                    });
-                                }
-                            };
-                            writer.write(blob);
-                        });
-                    });
-                });
-                return;
-            }
-
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 1000);
-        };
-
-        // ОРИГИНАЛЬНЫЙ РАБОЧИЙ МЕТОД СОХРАНЕНИЯ В DOCUMENTS
+        // ТА САМАЯ ОРИГИНАЛЬНАЯ РАБОЧАЯ ФУНКЦИЯ СОХРАНЕНИЯ ЧЕРЕЗ BLOB В DOCUMENTS
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalRootDirectory 
@@ -1363,19 +1307,12 @@
                             writer.onwriteend = function() {
                                 fileEntry.file(function(realFile) {
                                     const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён на телефон!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
+                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть: Documents/`);
                                 });
-                            };
-                            writer.onerror = function() {
-                                saveToFallbackStorage(blob, fileName);
                             };
                             writer.write(blob);
                         });
-                    }, function() {
-                        saveToFallbackStorage(blob, fileName);
                     });
-                }, function() {
-                    saveToFallbackStorage(blob, fileName);
                 });
                 return;
             }
@@ -1390,23 +1327,6 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
             }, 1000);
-        }
-
-        function saveToFallbackStorage(blob, fileName) {
-            const fallbackUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-            window.resolveLocalFileSystemURL(fallbackUri, function(dirEntry) {
-                dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                    fileEntry.createWriter(function(writer) {
-                        writer.onwriteend = function() {
-                            fileEntry.file(function(realFile) {
-                                const sizeKb = (realFile.size / 1024).toFixed(1);
-                                alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ`);
-                            });
-                        };
-                        writer.write(blob);
-                    });
-                });
-            });
         }
 
         // Скачивание отдельного снимка маски
@@ -1671,7 +1591,7 @@
             let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-            cv.Canny(blur, edged, 40, 140);
+            cv.Canny(blur, edged, 50, 150);
 
             let quad = null;
             const mode = targetMode.value;
@@ -1781,22 +1701,32 @@
 
         updateArchiveCounter();
 
-        function bootApplication() {
-            initCamera();
+        function requestAndStartCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.requestPermission(permissions.CAMERA, function() {}, function() {});
+                permissions.checkPermission(permissions.CAMERA, function(status) {
+                    if (status.hasPermission) {
+                        initCamera();
+                    } else {
+                        permissions.requestPermission(permissions.CAMERA, function() {
+                            initCamera();
+                        }, function() {
+                            initCamera();
+                        });
+                    }
+                }, function() {
+                    initCamera();
+                });
+            } else {
+                initCamera();
             }
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', bootApplication, false);
+            document.addEventListener('deviceready', requestAndStartCamera, false);
         } else {
-            document.addEventListener('DOMContentLoaded', bootApplication);
+            document.addEventListener('DOMContentLoaded', requestAndStartCamera);
         }
-        setTimeout(() => {
-            if (!mediaStream && !isCaptured) initCamera();
-        }, 300);
     </script>
 </body>
 </html>
