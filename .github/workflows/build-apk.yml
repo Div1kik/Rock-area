@@ -47,8 +47,8 @@ jobs:
           cordova plugin add cordova-plugin-file
           cordova plugin add es6-promise-plugin
           cordova plugin add cordova-plugin-x-socialsharing
-          # Официальный плагин прямой записи в Загрузки через Android MediaStore
-          cordova plugin add cordova-plugin-android-mediastore
+          # Нативный вызов интентов Android (для системного сохранения)
+          cordova plugin add com-darryncampbell-cordova-plugin-intent
 
           cordova platform add android
 
