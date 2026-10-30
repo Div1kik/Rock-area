@@ -662,15 +662,12 @@
         } catch (e) {}
 
         function stopCamera() {
-            if (focusTimer) {
-                clearTimeout(focusTimer);
-                focusTimer = null;
-            }
+            if (focusTimer) clearTimeout(focusTimer);
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => track.stop());
-                mediaStream = null;
-                videoTrack = null;
             }
+            mediaStream = null;
+            videoTrack = null;
             video.srcObject = null;
         }
 
@@ -678,47 +675,41 @@
             if (isCaptured) return;
             stopCamera();
 
-            const constraints = {
-                video: {
-                    facingMode: { ideal: "environment" },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
-                },
-                audio: false
-            };
+            video.setAttribute('autoplay', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
 
+            let stream = null;
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                    audio: false 
+                });
+            } catch (err1) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                } catch (err2) {
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    } catch (err3) {
+                        statusText.textContent = 'Камера отклонена';
+                        return;
+                    }
+                }
+            }
+
+            if (stream) {
                 mediaStream = stream;
                 video.srcObject = stream;
+                videoTrack = stream.getVideoTracks()[0];
                 
-                video.setAttribute('autoplay', '');
-                video.setAttribute('muted', '');
-                video.setAttribute('playsinline', '');
-
-                const playPromise = video.play();
+                let playPromise = video.play();
                 if (playPromise !== undefined) {
                     playPromise.catch(() => {
                         video.muted = true;
-                        video.play();
                     });
                 }
-                videoTrack = stream.getVideoTracks()[0];
                 applyContinuousFocus();
-            } catch (err) {
-                try {
-                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    mediaStream = fallbackStream;
-                    video.srcObject = fallbackStream;
-                    video.setAttribute('autoplay', '');
-                    video.setAttribute('muted', '');
-                    video.setAttribute('playsinline', '');
-                    video.play();
-                    videoTrack = fallbackStream.getVideoTracks()[0];
-                } catch (e) {
-                    statusText.textContent = 'Камера недоступна';
-                }
             }
         }
 
@@ -727,9 +718,7 @@
             try {
                 const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
                 if (caps.focusMode && caps.focusMode.includes('continuous')) {
-                    await videoTrack.applyConstraints({
-                        advanced: [{ focusMode: 'continuous' }]
-                    });
+                    await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
                 }
             } catch (e) {}
         }
@@ -808,7 +797,6 @@
             savePanel.style.display = 'flex';
             contourModeGroup.style.display = 'grid';
             sampleNameInput.value = `Керн-${records.length + 1}`;
-            if (video) video.pause();
         }
 
         function resetToLiveMode() {
@@ -1097,16 +1085,19 @@
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            snapCanvas.width = video.videoWidth || 1280;
-            snapCanvas.height = video.videoHeight || 720;
+            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
+            const h = video.videoHeight > 0 ? video.videoHeight : 720;
+            snapCanvas.width = w;
+            snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+            
+            ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            showResultMode();
             processFrame(lastRawMat, null);
+            showResultMode();
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1123,16 +1114,19 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = img.width;
-                    tempCanvas.height = img.height;
+                    const natW = img.naturalWidth || img.width || 1000;
+                    const natH = img.naturalHeight || img.height || 1000;
+                    
+                    tempCanvas.width = natW;
+                    tempCanvas.height = natH;
                     const ctx = tempCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+                    ctx.drawImage(img, 0, 0, natW, natH);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    showResultMode();
                     processFrame(lastRawMat, null);
+                    showResultMode();
                 };
                 img.src = event.target.result;
             };
@@ -1215,7 +1209,7 @@
         }
 
         // =============================================================
-        // АРХИВ И ЭКСПОРТ (ВОССТАНОВЛЕННЫЙ ОРИГИНАЛЬНЫЙ МЕТОД BLOB)
+        // АРХИВ И СОХРАНЕНИЕ
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1294,29 +1288,36 @@
             }
         };
 
-        // ТА САМАЯ ОРИГИНАЛЬНАЯ РАБОЧАЯ ФУНКЦИЯ СОХРАНЕНИЯ ЧЕРЕЗ BLOB В DOCUMENTS
-        function saveBlobDirectlyToDevice(blob, fileName) {
+        // =============================================================
+        // ЖЕЛЕЗОБЕТОННОЕ СОХРАНЕНИЕ ТОЛЬКО В DOCUMENTS (БЕЗ DATA)
+        // =============================================================
+        function saveDataDirectlyToDevice(data, fileName) {
             if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalRootDirectory 
-                    ? (cordova.file.externalRootDirectory + 'Documents/') 
-                    : (cordova.file.externalDataDirectory || cordova.file.dataDirectory);
-
+                // Никаких резервных путей. ТОЛЬКО публичная папка Documents.
+                const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
+                
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                fileEntry.file(function(realFile) {
-                                    const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть: Documents/`);
-                                });
+                                alert(`✓ Файл успешно сохранён!\n\nИмя: ${fileName}\n\nОн находится в системной папке: Documents (Документы)`);
                             };
-                            writer.write(blob);
+                            writer.onerror = function(e) {
+                                alert('Ошибка записи файла в Documents: ' + e.toString());
+                            };
+                            writer.write(data); // Передаем чистые байты (String/ArrayBuffer/Blob)
                         });
+                    }, function(err) {
+                        alert('Ошибка создания файла в папке Documents. Код: ' + err.code);
                     });
+                }, function(err) {
+                    alert('Не удалось получить доступ к папке Documents. Код: ' + err.code);
                 });
                 return;
             }
 
+            // Fallback для ПК-браузера
+            let blob = data instanceof Blob ? data : new Blob([data]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1329,7 +1330,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски
+        // Скачивание отдельного снимка маски (Передаём ArrayBuffer)
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1341,10 +1342,10 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'image/jpeg' });
             const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
 
-            saveBlobDirectlyToDevice(blob, fileName);
+            const blob = new Blob([byteArray.buffer], { type: 'image/jpeg' });
+            saveDataDirectlyToDevice(blob, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1377,7 +1378,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы за период
+        // Скачивание CSV таблицы (Передаём ArrayBuffer)
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1389,12 +1390,14 @@
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+            
+            const csvBytes = new TextEncoder().encode(csvContent);
+            const blob = new Blob([csvBytes.buffer], { type: 'text/csv;charset=utf-8' });
 
-            saveBlobDirectlyToDevice(blob, fileName);
+            saveDataDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив за период
+        // Пакетный ZIP-архив (Передаём ArrayBuffer)
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1425,8 +1428,10 @@
                 const toStr = filterDateTo.value || 'все';
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
-                const zipBlob = await zip.generateAsync({ type: "blob" });
-                saveBlobDirectlyToDevice(zipBlob, fileName);
+                const zipArray = await zip.generateAsync({ type: "arraybuffer" });
+                const blob = new Blob([zipArray], { type: 'application/zip' });
+                
+                saveDataDirectlyToDevice(blob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1435,7 +1440,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола
+        // Формирование HTML-фотопротокола (Передаём ArrayBuffer)
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1501,8 +1506,10 @@
 </body>
 </html>`;
 
-            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
-            saveBlobDirectlyToDevice(blob, fileName);
+            const htmlBytes = new TextEncoder().encode(htmlDoc);
+            const blob = new Blob([htmlBytes.buffer], { type: 'text/html;charset=utf-8' });
+            
+            saveDataDirectlyToDevice(blob, fileName);
         };
 
         // =============================================================
@@ -1591,7 +1598,7 @@
             let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-            cv.Canny(blur, edged, 50, 150);
+            cv.Canny(blur, edged, 40, 140);
 
             let quad = null;
             const mode = targetMode.value;
@@ -1648,7 +1655,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
