@@ -510,6 +510,7 @@
                 </div>
             </div>
 
+            <!-- Чистые кнопки сохранения. Файлы падают строго в Documents -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <button class="btn btn-green" id="export-excel-period-btn">
                     <span>💾</span> Скачать CSV
@@ -647,59 +648,73 @@
             galleryBtn.disabled = false;
         }
 
-        if (window.DeviceOrientationEvent) {
-            window.addEventListener('deviceorientation', (e) => {
-                if (e.beta === null || e.gamma === null) return;
-                let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
-                let y = Math.max(-14, Math.min(14, e.beta * 0.7));
-                gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
-                const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
-                gyroLabel.textContent = `${Math.round(totalTilt)}°`;
-                gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
-            });
-        }
+        try {
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', (e) => {
+                    if (e.beta === null || e.gamma === null) return;
+                    let x = Math.max(-14, Math.min(14, e.gamma * 0.7));
+                    let y = Math.max(-14, Math.min(14, e.beta * 0.7));
+                    gyroBubble.style.transform = `translate(${x}px, ${y}px)`;
+                    const totalTilt = Math.sqrt(e.beta * e.beta + e.gamma * e.gamma);
+                    gyroLabel.textContent = `${Math.round(totalTilt)}°`;
+                    gyroBubble.style.background = totalTilt <= 4 ? '#10b981' : '#f59e0b';
+                });
+            }
+        } catch (e) {}
 
         function stopCamera() {
-            if (focusTimer) {
-                clearTimeout(focusTimer);
-                focusTimer = null;
-            }
+            if (focusTimer) clearTimeout(focusTimer);
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => track.stop());
-                mediaStream = null;
-                videoTrack = null;
             }
+            mediaStream = null;
+            videoTrack = null;
             video.srcObject = null;
         }
 
+        // ЖЕЛЕЗОБЕТОННЫЙ СТАРТ КАМЕРЫ, НЕ БЛОКИРУЮЩИЙСЯ ПЛАГИНАМИ
         async function initCamera() {
             if (isCaptured) return;
-            const constraints = {
-                video: {
-                    facingMode: { ideal: "environment" },
-                    width: { ideal: 1280, max: 1920 },
-                    height: { ideal: 720, max: 1080 }
-                },
-                audio: false
-            };
+            stopCamera();
 
+            video.setAttribute('autoplay', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
+
+            let stream = null;
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                // Основная попытка (HD, задняя камера)
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                    audio: false 
+                });
+            } catch (err1) {
+                try {
+                    // Страховочная попытка 1 (Просто задняя камера)
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                } catch (err2) {
+                    try {
+                        // Страховочная попытка 2 (Любая доступная камера)
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    } catch (err3) {
+                        statusText.textContent = 'Камера отклонена';
+                        return;
+                    }
+                }
+            }
+
+            if (stream) {
                 mediaStream = stream;
                 video.srcObject = stream;
-                await video.play();
                 videoTrack = stream.getVideoTracks()[0];
-                applyContinuousFocus();
-            } catch (err) {
-                try {
-                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    mediaStream = fallbackStream;
-                    video.srcObject = fallbackStream;
-                    await video.play();
-                    videoTrack = fallbackStream.getVideoTracks()[0];
-                } catch (e) {
-                    statusText.textContent = 'Камера недоступна';
+                
+                let playPromise = video.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(() => {
+                        video.muted = true;
+                    });
                 }
+                applyContinuousFocus();
             }
         }
 
@@ -708,9 +723,7 @@
             try {
                 const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
                 if (caps.focusMode && caps.focusMode.includes('continuous')) {
-                    await videoTrack.applyConstraints({
-                        advanced: [{ focusMode: 'continuous' }]
-                    });
+                    await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
                 }
             } catch (e) {}
         }
@@ -816,11 +829,7 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            if (video.srcObject) {
-                video.play();
-            } else {
-                initCamera();
-            }
+            initCamera();
         }
 
         // =============================================================
@@ -1076,26 +1085,29 @@
         }
 
         // =============================================================
-        // ОБРАБОТКА КАДРА (ЧЕТКИЙ ЗАХВАТ ДО ПАУЗЫ ВИДЕО)
+        // ОБРАБОТКА КАДРА (ЧЕТКИЕ РАЗМЕРЫ БЕЗ ЧЕРНОТЫ)
         // =============================================================
         captureBtn.addEventListener('click', () => {
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            snapCanvas.width = video.videoWidth || 1280;
-            snapCanvas.height = video.videoHeight || 720;
+            // Если разрешение 0 (еще не подтянулось), берём дефолтное
+            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
+            const h = video.videoHeight > 0 ? video.videoHeight : 720;
+            snapCanvas.width = w;
+            snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
             
-            // 1. Обязательно считываем пиксели ДО остановки потока видео!
-            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+            // Важно: захват кадра ДО любых других действий!
+            ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            // 2. Обрабатываем OpenCV
+            // Обработка
             processFrame(lastRawMat, null);
             
-            // 3. Только потом прячем камеру
+            // Затем интерфейс
             showResultMode();
         });
 
@@ -1113,11 +1125,15 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    // Обязательно берём реальные размеры загруженной картинки
-                    tempCanvas.width = img.naturalWidth || img.width;
-                    tempCanvas.height = img.naturalHeight || img.height;
+                    // Важно: на телефонах ширина незакрепленной картинки (img.width) может быть = 0
+                    // Используем img.naturalWidth для 100% гарантии загрузки байтов
+                    const natW = img.naturalWidth || img.width || 1000;
+                    const natH = img.naturalHeight || img.height || 1000;
+                    
+                    tempCanvas.width = natW;
+                    tempCanvas.height = natH;
                     const ctx = tempCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+                    ctx.drawImage(img, 0, 0, natW, natH);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
@@ -1206,7 +1222,7 @@
         }
 
         // =============================================================
-        // АРХИВ И ПРЯМОЕ СОХРАНЕНИЕ В ПАПКУ DOCUMENTS
+        // АРХИВ
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1285,17 +1301,12 @@
             }
         };
 
-        function generateCsvStringForArray(recordsArray) {
-            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-            recordsArray.forEach((r, i) => {
-                csv += `${i + 1};${r.name};${r.area};${r.baseMm};${r.mode};${r.date};${r.time};${r.threshold}\n`;
-            });
-            return csv;
-        }
-
-        // ЖЁСТКАЯ ЗАПИСЬ СТРОГО В ПАПКУ "DOCUMENTS" (Документы)
+        // =============================================================
+        // СОХРАНЕНИЕ СТРОГО В ПАПКУ DOCUMENTS
+        // =============================================================
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
+                // Строго прописан путь к Документам
                 const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
                 
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
@@ -1311,7 +1322,7 @@
                 return;
             }
 
-            // Fallback для работы приложения из браузера на ПК
+            // Запасной план для компьютера
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1364,7 +1375,15 @@
             currentViewingRecord = null;
         };
 
-        // Скачивание CSV таблицы за период
+        function generateCsvStringForArray(recordsArray) {
+            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
+            recordsArray.forEach((r, i) => {
+                csv += `${i + 1};${r.name};${r.area};${r.baseMm};${r.mode};${r.date};${r.time};${r.threshold}\n`;
+            });
+            return csv;
+        }
+
+        // Скачивание CSV таблицы
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1381,7 +1400,7 @@
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив за период
+        // Пакетный ZIP-архив
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1578,7 +1597,9 @@
             let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-            cv.Canny(blur, edged, 50, 150);
+            
+            // Чуть снижаем порог, чтобы детектор лучше видел линии рамки на бумаге
+            cv.Canny(blur, edged, 30, 100);
 
             let quad = null;
             const mode = targetMode.value;
@@ -1688,14 +1709,19 @@
 
         updateArchiveCounter();
 
-        function startAppCamera() {
+        // СТАРТ КАМЕРЫ БЕЗ БЛОКИРОВОК (НЕ ПРЕРЫВАЕТ ПОТОК, ДАЖЕ ЕСЛИ ПЛАГИН МОЛЧИТ)
+        function requestAndStartCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.requestPermission(permissions.CAMERA, function(status) {
+                permissions.checkPermission(permissions.CAMERA, function(status) {
                     if (status.hasPermission) {
                         initCamera();
                     } else {
-                        alert('Для работы планиметра требуется доступ к камере.');
+                        permissions.requestPermission(permissions.CAMERA, function() {
+                            initCamera();
+                        }, function() {
+                            initCamera();
+                        });
                     }
                 }, function() {
                     initCamera();
@@ -1706,9 +1732,9 @@
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', startAppCamera, false);
+            document.addEventListener('deviceready', requestAndStartCamera, false);
         } else {
-            document.addEventListener('DOMContentLoaded', startAppCamera);
+            document.addEventListener('DOMContentLoaded', requestAndStartCamera);
         }
     </script>
 </body>
