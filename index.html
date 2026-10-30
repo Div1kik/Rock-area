@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Лабораторный планиметр керна</title>
+    <script src="cordova.js"></script>
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
@@ -679,55 +680,48 @@
             }
         });
 
-                // =============================================================
-        // ЖЕЛЕЗОБЕТОННЫЙ ЭКСПОРТ (SocialSharing -> Web Share -> Fallback)
+                       // =============================================================
+        // ПРЯМОЙ ЭКСПОРТ ЧЕРЕЗ BASE64 (БЕЗ СБОЕВ ФАЙЛОВОЙ СИСТЕМЫ)
         // =============================================================
-        function deliverFileToSystem(blobData, fileName) {
-            // 1. Если внутри Cordova приложения (через системный шеринг файлов)
-            if (window.plugins && window.plugins.socialsharing && window.resolveLocalFileSystemURL) {
-                const targetDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(targetDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                window.plugins.socialsharing.shareWithOptions({
-                                    message: `Файл: ${fileName}`,
-                                    subject: fileName,
-                                    files: [fileEntry.nativeURL]
-                                }, () => {}, (err) => alert('Ошибка системной отправки: ' + err));
-                            };
-                            writer.onerror = (e) => alert('Ошибка записи: ' + JSON.stringify(e));
-                            writer.write(blobData);
-                        }, (err) => alert('Не удалось начать запись: ' + JSON.stringify(err)));
-                    }, (err) => alert('Не удалось создать временный файл: ' + JSON.stringify(err)));
-                }, (err) => alert('Доступ к кэшу закрыт: ' + JSON.stringify(err)));
-                return;
-            }
-
-            // 2. Если браузер поддерживает Web Share API
-            const file = new File([blobData], fileName, { type: blobData.type });
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                navigator.share({
-                    files: [file],
-                    title: fileName,
-                    text: 'Выгрузка данных Rock Area'
-                }).catch(e => {
-                    if (e.name !== 'AbortError') alert('Ошибка Web Share: ' + e.message);
+        function shareBase64File(base64DataWithPrefix, fileName) {
+            // 1. Проверяем наличие плагина шторки Android (SocialSharing)
+            if (window.plugins && window.plugins.socialsharing) {
+                window.plugins.socialsharing.shareWithOptions({
+                    message: `Файл: ${fileName}`,
+                    subject: fileName,
+                    files: [base64DataWithPrefix]
+                }, function(result) {
+                    // Успешно открыто/отправлено
+                }, function(err) {
+                    alert('Ошибка отправки: ' + JSON.stringify(err));
                 });
                 return;
             }
 
-            // 3. Классическое сохранение в обычном браузере
-            const blobUrl = URL.createObjectURL(blobData);
-            const downloadLink = document.createElement('a');
-            downloadLink.href = blobUrl;
-            downloadLink.download = fileName;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            setTimeout(() => {
-                document.body.removeChild(downloadLink);
-                URL.revokeObjectURL(blobUrl);
-            }, 1000);
+            // 2. Если открыто в обычном браузере на ПК
+            try {
+                const arr = base64DataWithPrefix.split(',');
+                const mime = arr[0].match(/:(.*?);/)[1];
+                const bstr = atob(arr[1]);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) {
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                const blob = new Blob([u8arr], { type: mime });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                }, 1000);
+            } catch (e) {
+                alert('Ошибка скачивания: ' + e.message);
+            }
         }
 
         // 1. Выгрузка в Excel / CSV
@@ -743,9 +737,11 @@
                     csvContent += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
                 });
 
-                const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+                // Кодируем CSV в Base64 с поддержкой кириллицы
+                const base64Csv = 'data:text/csv;charset=utf-8;base64,' + btoa(unescape(encodeURIComponent(csvContent)));
                 const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                deliverFileToSystem(csvBlob, fileName);
+                
+                shareBase64File(base64Csv, fileName);
             } catch (err) {
                 alert('Ошибка при выгрузке таблицы: ' + err.message);
             }
@@ -779,9 +775,12 @@
                     if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
                 });
 
-                const zipBlob = await zip.generateAsync({ type: "blob" });
+                // Генерируем ZIP сразу в чистый base64 без промежуточных Blob и файловой системы
+                const zipBase64 = await zip.generateAsync({ type: "base64" });
+                const base64DataUri = 'data:application/zip;base64,' + zipBase64;
                 const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
-                deliverFileToSystem(zipBlob, fileName);
+
+                shareBase64File(base64DataUri, fileName);
             } catch (err) {
                 alert('Ошибка при создании архива: ' + err.message);
             } finally {
@@ -789,6 +788,7 @@
                 exportZipBtn.style.pointerEvents = 'auto';
             }
         };
+ 
 
 
         function orderPoints(ptsArr) {
