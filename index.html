@@ -1201,7 +1201,7 @@
         }
 
         // =============================================================
-        // АРХИВ И СОХРАНЕНИЕ
+        // АРХИВ И ПРЯМОЕ СИСТЕМНОЕ СОХРАНЕНИЕ
         // =============================================================
         openArchiveBtn.onclick = () => {
             archiveModal.style.display = 'flex';
@@ -1251,7 +1251,7 @@
                         <button class="item-btn" onclick="openPhotoViewer(${rec.id})">
                             <span>🖼️</span> Фото
                         </button>
-                        <button class="item-btn" title="Скачать фото маски" onclick="saveSingleSamplePhoto(${rec.id})">
+                        <button class="item-btn" title="Сохранить фото маски" onclick="saveSingleSamplePhoto(${rec.id})">
                             <span>💾</span>
                         </button>
                         <button class="btn-red" onclick="deleteArchiveRecord(${rec.id})">✕</button>
@@ -1280,6 +1280,45 @@
             }
         };
 
+        // НАСТОЯЩИЙ СИСТЕМНЫЙ ДИАЛОГ ANDROID ДЛЯ СОХРАНЕНИЯ ФАЙЛА
+        function saveDocumentViaSystemDialog(blob, fileName) {
+            // Android Cordova APK
+            if (window.cordova && cordova.file) {
+                const cacheDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(cacheDir, function(dirEntry) {
+                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
+                        fileEntry.createWriter(function(writer) {
+                            writer.onwriteend = function() {
+                                // Запускаем системное окно Android «Сохранить файл в память / диск»
+                                if (window.plugins && window.plugins.socialsharing) {
+                                    window.plugins.socialsharing.shareWithOptions({
+                                        message: fileName,
+                                        subject: fileName,
+                                        files: [fileEntry.nativeURL],
+                                        chooserTitle: 'Сохранить в Загрузки или память'
+                                    });
+                                }
+                            };
+                            writer.write(blob);
+                        });
+                    });
+                });
+                return;
+            }
+
+            // Для браузера на компьютере
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 1000);
+        }
+
         // 1. Скачивание отдельного снимка маски образца
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
@@ -1295,7 +1334,7 @@
             const blob = new Blob([byteArray], { type: 'image/jpeg' });
             const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
 
-            saveBlobToDeviceStorage(blob, fileName);
+            saveDocumentViaSystemDialog(blob, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1342,7 +1381,7 @@
             const csvContent = generateCsvStringForArray(filtered);
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
 
-            saveBlobToDeviceStorage(blob, fileName);
+            saveDocumentViaSystemDialog(blob, fileName);
         };
 
         // 3. Пакетный ZIP-архив за период
@@ -1377,7 +1416,7 @@
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
                 const zipBlob = await zip.generateAsync({ type: "blob" });
-                saveBlobToDeviceStorage(zipBlob, fileName);
+                saveDocumentViaSystemDialog(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1453,39 +1492,8 @@
 </html>`;
 
             const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
-            saveBlobToDeviceStorage(blob, fileName);
+            saveDocumentViaSystemDialog(blob, fileName);
         };
-
-        // Сохранение напрямую в рабочую память приложения на накопителе
-        function saveBlobToDeviceStorage(blob, fileName) {
-            if (window.cordova && cordova.file) {
-                const targetDirUri = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                fileEntry.file(function(realFile) {
-                                    const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть на телефоне:\nAndroid/data/com.div1kik.rockarea/files/`);
-                                });
-                            };
-                            writer.write(blob);
-                        });
-                    });
-                });
-            } else {
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 1000);
-            }
-        }
 
         // =============================================================
         // OPENCV АЛГОРИТМЫ
@@ -1630,7 +1638,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
