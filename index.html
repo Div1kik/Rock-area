@@ -1299,7 +1299,7 @@
                             writer.onwriteend = function() {
                                 fileEntry.file(function(realFile) {
                                     const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть: Documents/`);
+                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents/`);
                                 });
                             };
                             writer.write(blob);
@@ -1369,7 +1369,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы с конвертацией в бинарный массив Uint8Array (решает проблему нулевого веса)
+        // Скачивание CSV с конвертацией в Uint8Array для правильной записи
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1382,13 +1382,13 @@
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
             
-            const csvArray = new TextEncoder().encode(csvContent);
-            const blob = new Blob([csvArray], { type: 'text/csv' });
+            const csvBytes = new TextEncoder().encode(csvContent);
+            const blob = new Blob([csvBytes], { type: 'text/csv;charset=utf-8' });
 
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив (выдает честный бинарный массив)
+        // Пакетный ZIP-архив с явным выводом в Uint8Array
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1420,7 +1420,7 @@
                 const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
 
                 const zipArray = await zip.generateAsync({ type: "uint8array" });
-                const zipBlob = new Blob([zipArray], { type: 'application/zip' });
+                const zipBlob = new Blob([zipArray], { type: "application/zip" });
                 saveBlobDirectlyToDevice(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
@@ -1430,7 +1430,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола
+        // Формирование HTML-фотопротокола с конвертацией в Uint8Array
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1496,8 +1496,8 @@
 </body>
 </html>`;
 
-            const htmlArray = new TextEncoder().encode(htmlDoc);
-            const blob = new Blob([htmlArray], { type: 'text/html' });
+            const htmlBytes = new TextEncoder().encode(htmlDoc);
+            const blob = new Blob([htmlBytes], { type: 'text/html;charset=utf-8' });
             saveBlobDirectlyToDevice(blob, fileName);
         };
 
