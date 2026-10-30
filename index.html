@@ -58,6 +58,20 @@
             letter-spacing: -0.3px;
         }
 
+        .header-btn {
+            background: #1e293b;
+            border: 1px solid var(--card-border);
+            color: #f1f5f9;
+            padding: 7px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
         .view-wrapper {
             position: relative;
             width: 100%;
@@ -258,9 +272,10 @@
             background: rgba(239, 68, 68, 0.15);
             border: 1px solid rgba(239, 68, 68, 0.3);
             color: var(--accent-red);
-            padding: 5px 8px;
-            font-size: 11px;
-            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            border-radius: 8px;
+            cursor: pointer;
         }
 
         .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -279,43 +294,91 @@
         }
         select:focus, .input-text:focus { border-color: var(--accent-cyan); }
 
-        .log-section {
+        /* Полноэкранное модальное окно архива */
+        .archive-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(11, 15, 25, 0.95);
+            backdrop-filter: blur(18px);
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            padding: 16px 14px 24px;
+            overflow-y: auto;
+        }
+
+        .archive-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .archive-title { font-size: 1.25rem; font-weight: 700; }
+
+        .archive-filter-card {
             background: var(--bg-card);
             border: 1px solid var(--card-border);
-            border-radius: 18px;
+            border-radius: 16px;
             padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            backdrop-filter: blur(14px);
+            gap: 12px;
+            margin-bottom: 14px;
         }
-        .log-header { display: flex; justify-content: space-between; align-items: center; }
-        .log-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); }
-        .table-wrap {
-            max-height: 190px;
-            overflow-y: auto;
-            border-radius: 10px;
-            border: 1px solid var(--card-border);
-            background: #0b1120;
-        }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-        th, td { padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.08); }
-        th { background: #131d33; color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; }
 
-        .export-btns {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-top: 4px;
+        .filter-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        .archive-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-        .export-btns .btn {
-            padding: 12px 6px;
-            font-size: 13px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+
+        .archive-item {
+            background: var(--bg-card);
+            border: 1px solid var(--card-border);
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .item-info { display: flex; flex-direction: column; gap: 3px; }
+        .item-name { font-size: 14px; font-weight: 700; }
+        .item-meta { font-size: 11.5px; color: var(--text-secondary); }
+        .item-area { font-size: 15px; font-weight: 800; color: var(--accent-mint); margin-top: 2px; }
+
+        .item-actions { display: flex; align-items: center; gap: 8px; }
+        .item-btn {
+            background: #1e293b;
+            border: 1px solid var(--card-border);
+            color: #f1f5f9;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Модалка просмотра фото */
+        .photo-viewer {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            display: none;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
+            padding: 16px;
         }
+        .viewer-img { max-width: 100%; max-height: 70vh; border-radius: 12px; border: 1px solid var(--card-border); }
+        .viewer-controls { margin-top: 14px; display: flex; gap: 10px; }
     </style>
 </head>
 <body>
@@ -325,6 +388,9 @@
             <span>📐</span>
             <span>Rock Area Core</span>
         </div>
+        <button class="header-btn" id="open-archive-btn">
+            <span>📁</span> Архив (<span id="header-archive-count">0</span>)
+        </button>
     </header>
 
     <div class="view-wrapper" id="view-wrapper">
@@ -410,37 +476,50 @@
                 <label class="input-label" for="sample-name">Шифр керна / образца:</label>
                 <input type="text" id="sample-name" class="input-text" placeholder="Керн-1">
             </div>
-            <button class="btn btn-green" id="save-record-btn">📥 Записать в журнал смены</button>
+            <button class="btn btn-green" id="save-record-btn">📥 Записать в архив</button>
+        </div>
+    </div>
+
+    <!-- Полноэкранный Архив замеров -->
+    <div class="archive-modal" id="archive-modal">
+        <div class="archive-header">
+            <div class="archive-title">📁 Архив замеров</div>
+            <button class="header-btn" id="close-archive-btn">✕ Закрыть</button>
         </div>
 
-        <div class="log-section">
-            <div class="log-header">
-                <span class="log-title">Стек замеров (<span id="record-count">0</span>)</span>
-                <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 11px;" id="clear-all-btn">Очистить</button>
+        <!-- Фильтр дат и выгрузка Excel -->
+        <div class="archive-filter-card">
+            <div class="filter-dates">
+                <div class="input-group">
+                    <label class="input-label" for="filter-date-from">Дата С:</label>
+                    <input type="date" id="filter-date-from" class="input-text">
+                </div>
+                <div class="input-group">
+                    <label class="input-label" for="filter-date-to">Дата ПО:</label>
+                    <input type="date" id="filter-date-to" class="input-text">
+                </div>
             </div>
-            
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>№</th>
-                            <th>Шифр</th>
-                            <th>S, см²</th>
-                            <th>База</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="log-tbody"></tbody>
-                </table>
-            </div>
-
-            <div class="export-btns">
-                <button class="btn btn-secondary" id="export-csv-btn">💾 Сохранить (CSV)</button>
-                <button class="btn btn-secondary" id="export-zip-btn">📦 Сохранить (ZIP)</button>
-            </div>
-            <button class="btn btn-secondary" id="share-report-btn" style="width: 100%; margin-top: 6px;">
-                <span>📤</span> Поделиться отчётом (CSV)
+            <button class="btn btn-green" id="export-excel-period-btn">
+                <span>📊</span> Выгрузить Excel (.xls) за период
             </button>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase;">
+                Найдено замеров: <b id="filtered-count" style="color: var(--accent-mint);">0</b>
+            </span>
+            <button class="btn-red" id="clear-all-archive-btn" style="padding: 4px 8px; font-size: 11px;">Очистить всё</button>
+        </div>
+
+        <div class="archive-list" id="archive-list-container"></div>
+    </div>
+
+    <!-- Модалка просмотра фото -->
+    <div class="photo-viewer" id="photo-viewer">
+        <img id="viewer-img-el" class="viewer-img" src="" alt="Фото скола">
+        <div class="viewer-controls">
+            <button class="header-btn" id="toggle-photo-mode-btn">Показать маску</button>
+            <button class="header-btn" id="close-viewer-btn">Закрыть</button>
         </div>
     </div>
 
@@ -481,12 +560,25 @@
         const gyroBubble = document.getElementById('gyro-bubble');
         const gyroLabel = document.getElementById('gyro-label');
 
-        const logTbody = document.getElementById('log-tbody');
-        const recordCount = document.getElementById('record-count');
-        const exportCsvBtn = document.getElementById('export-csv-btn');
-        const exportZipBtn = document.getElementById('export-zip-btn');
-        const shareReportBtn = document.getElementById('share-report-btn');
-        const clearAllBtn = document.getElementById('clear-all-btn');
+        // Элементы архива
+        const openArchiveBtn = document.getElementById('open-archive-btn');
+        const closeArchiveBtn = document.getElementById('close-archive-btn');
+        const archiveModal = document.getElementById('archive-modal');
+        const headerArchiveCount = document.getElementById('header-archive-count');
+        const filterDateFrom = document.getElementById('filter-date-from');
+        const filterDateTo = document.getElementById('filter-date-to');
+        const exportExcelPeriodBtn = document.getElementById('export-excel-period-btn');
+        const archiveListContainer = document.getElementById('archive-list-container');
+        const filteredCount = document.getElementById('filtered-count');
+        const clearAllArchiveBtn = document.getElementById('clear-all-archive-btn');
+
+        // Просмотр фото
+        const photoViewer = document.getElementById('photo-viewer');
+        const viewerImgEl = document.getElementById('viewer-img-el');
+        const togglePhotoModeBtn = document.getElementById('toggle-photo-mode-btn');
+        const closeViewerBtn = document.getElementById('close-viewer-btn');
+        let currentViewingRecord = null;
+        let isShowingMaskInViewer = false;
 
         const WARP_SIZE = 500;
 
@@ -511,14 +603,6 @@
         function getRealAreaCm2() {
             const sideMm = parseFloat(frameSizeInput.value) || 100.0;
             return (sideMm * sideMm) / 100.0;
-        }
-
-        function generateCsvString() {
-            let csv = '\uFEFF№;Шифр образца;Площадь (см²);База (мм);Тип;Дата;Время;Порог\n';
-            records.forEach((rec, idx) => {
-                csv += `${idx + 1};${rec.name};${rec.area};${rec.baseMm};${rec.mode};${rec.date};${rec.time};${rec.threshold}\n`;
-            });
-            return csv;
         }
 
         function onOpenCvReady() {
@@ -925,9 +1009,9 @@
 
             records.push(record);
             saveRecordsToStorage();
-            renderTable();
+            updateArchiveCounter();
 
-            infoDisplay.innerHTML = `<span style="color:var(--accent-mint);">✓ Записан в журнал: ${name}</span>`;
+            infoDisplay.innerHTML = `<span style="color:var(--accent-mint);">✓ Записан в архив: ${name}</span>`;
             savePanel.style.display = 'none';
         });
 
@@ -935,174 +1019,220 @@
             try {
                 localStorage.setItem('rock_test_records', JSON.stringify(records));
             } catch (e) {
-                alert('Память переполнена! Экспортируйте архив (ZIP) и очистите журнал.');
+                alert('Память заполнена! Очистите часть записей из архива.');
             }
         }
 
-        function renderTable() {
-            logTbody.innerHTML = '';
-            recordCount.textContent = records.length;
+        function updateArchiveCounter() {
+            headerArchiveCount.textContent = records.length;
+        }
 
-            records.forEach((rec, idx) => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td>${idx + 1}</td>
-                    <td><b>${rec.name}</b></td>
-                    <td style="color:var(--accent-mint); font-weight:700;">${rec.area}</td>
-                    <td style="color:var(--text-secondary);">${rec.baseMm} мм</td>
-                    <td><button class="btn-red" onclick="deleteRecord(${rec.id})">✕</button></td>
-                `;
-                logTbody.appendChild(tr);
+        // =============================================================
+        // ЛОГИКА АРХИВА, ФИЛЬТРАЦИИ И EXCEL (.XLS)
+        // =============================================================
+        openArchiveBtn.onclick = () => {
+            archiveModal.style.display = 'flex';
+            const today = new Date().toISOString().slice(0, 10);
+            if (!filterDateFrom.value) filterDateFrom.value = records.length > 0 ? records[0].date : today;
+            if (!filterDateTo.value) filterDateTo.value = today;
+            renderArchiveList();
+        };
+
+        closeArchiveBtn.onclick = () => {
+            archiveModal.style.display = 'none';
+        };
+
+        filterDateFrom.onchange = renderArchiveList;
+        filterDateTo.onchange = renderArchiveList;
+
+        function getFilteredRecords() {
+            const from = filterDateFrom.value;
+            const to = filterDateTo.value;
+            return records.filter(r => {
+                if (from && r.date < from) return false;
+                if (to && r.date > to) return false;
+                return true;
             });
         }
 
-        window.deleteRecord = function(id) {
-            records = records.filter(r => r.id !== id);
-            saveRecordsToStorage();
-            renderTable();
-        };
+        function renderArchiveList() {
+            const filtered = getFilteredRecords();
+            filteredCount.textContent = filtered.length;
+            archiveListContainer.innerHTML = '';
 
-        clearAllBtn.addEventListener('click', () => {
-            if (records.length === 0) return;
-            if (confirm('Очистить весь журнал смены?')) {
-                records = [];
-                saveRecordsToStorage();
-                renderTable();
-            }
-        });
-
-        // =============================================================
-        // ПРЯМОЕ СОХРАНЕНИЕ В ПАМЯТЬ УСТРОЙСТВА БЕЗ ШТОРОК
-        // =============================================================
-        function saveDirectlyToAppStorage(blobData, fileName) {
-            // Android APK (Cordova)
-            if (window.cordova && cordova.file) {
-                // Пишем в официальную внешнюю папку приложения на накопителе
-                const appExternalDir = cordova.file.externalDataDirectory || cordova.file.dataDirectory;
-
-                window.resolveLocalFileSystemURL(appExternalDir, function(dirEntry) {
-                    dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
-                        fileEntry.createWriter(function(writer) {
-                            writer.onwriteend = function() {
-                                fileEntry.file(function(realFile) {
-                                    const sizeKb = (realFile.size / 1024).toFixed(1);
-                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПуть на накопителе:\nAndroid/data/com.div1kik.rockarea/files/`);
-                                });
-                            };
-                            writer.onerror = function(err) {
-                                alert('Ошибка записи файла: ' + JSON.stringify(err));
-                            };
-                            writer.write(blobData);
-                        }, function(err) {
-                            alert('Ошибка потока: ' + JSON.stringify(err));
-                        });
-                    }, function(err) {
-                        alert('Не удалось создать файл: ' + JSON.stringify(err));
-                    });
-                }, function(err) {
-                    alert('Нет доступа к накопителю: ' + JSON.stringify(err));
-                });
+            if (filtered.length === 0) {
+                archiveListContainer.innerHTML = `<div style="text-align:center; padding:24px; color:var(--text-secondary); font-size:13px;">За замеров за выбранный период не найдено.</div>`;
                 return;
             }
 
-            // Для ПК в браузере
-            const blobUrl = URL.createObjectURL(blobData);
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(blobUrl);
-            }, 1000);
+            filtered.forEach(rec => {
+                const item = document.createElement('div');
+                item.className = 'archive-item';
+                item.innerHTML = `
+                    <div class="item-info">
+                        <span class="item-name">${rec.name}</span>
+                        <span class="item-meta">📅 ${rec.date} ${rec.time} | База: ${rec.baseMm} мм</span>
+                        <span class="item-area">S = ${rec.area} см²</span>
+                    </div>
+                    <div class="item-actions">
+                        <button class="item-btn" onclick="openPhotoViewer(${rec.id})">
+                            <span>🖼️</span> Фото
+                        </button>
+                        <button class="btn-red" onclick="deleteArchiveRecord(${rec.id})">✕</button>
+                    </div>
+                `;
+                archiveListContainer.appendChild(item);
+            });
         }
 
-        // 1. Выгрузка CSV таблицы
-        exportCsvBtn.onclick = function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст!');
-                return;
-            }
-            try {
-                const csvContent = generateCsvString();
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-                const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
-                
-                saveDirectlyToAppStorage(blob, fileName);
-            } catch (err) {
-                alert('Ошибка CSV: ' + err.message);
+        window.deleteArchiveRecord = function(id) {
+            if (confirm('Удалить этот замер из архива?')) {
+                records = records.filter(r => r.id !== id);
+                saveRecordsToStorage();
+                updateArchiveCounter();
+                renderArchiveList();
             }
         };
 
-        // 2. Выгрузка ZIP архива с фото
-        exportZipBtn.onclick = async function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст!');
-                return;
-            }
-            if (typeof JSZip === 'undefined') {
-                alert('Библиотека JSZip ещё загружается...');
-                return;
-            }
-
-            exportZipBtn.style.opacity = '0.5';
-            exportZipBtn.style.pointerEvents = 'none';
-
-            try {
-                const zip = new JSZip();
-                const folderRaw = zip.folder("1_Исходники");
-                const folderMasks = zip.folder("2_Контуры_маски");
-
-                records.forEach((rec, idx) => {
-                    const prefix = `${idx + 1}_${rec.name}`;
-                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-                });
-
-                const zipBlob = await zip.generateAsync({ type: "blob" });
-                const fileName = `Фотоархив_сколов_${new Date().toISOString().slice(0, 10)}.zip`;
-
-                saveDirectlyToAppStorage(zipBlob, fileName);
-            } catch (err) {
-                alert('Ошибка создания архива: ' + err.message);
-            } finally {
-                exportZipBtn.style.opacity = '1';
-                exportZipBtn.style.pointerEvents = 'auto';
+        clearAllArchiveBtn.onclick = () => {
+            if (records.length === 0) return;
+            if (confirm('Очистить ВСЕ замеры из архива устройства?')) {
+                records = [];
+                saveRecordsToStorage();
+                updateArchiveCounter();
+                renderArchiveList();
             }
         };
 
-        // 3. Отдельная кнопка «Поделиться отчётом (CSV)»
-        shareReportBtn.onclick = function() {
-            if (!records || records.length === 0) {
-                alert('Журнал смены пуст!');
+        // Просмотр фото образца
+        window.openPhotoViewer = function(id) {
+            const rec = records.find(r => r.id === id);
+            if (!rec) return;
+            currentViewingRecord = rec;
+            isShowingMaskInViewer = false;
+            viewerImgEl.src = rec.rawImg || rec.maskImg;
+            togglePhotoModeBtn.textContent = 'Показать маску';
+            photoViewer.style.display = 'flex';
+        };
+
+        togglePhotoModeBtn.onclick = () => {
+            if (!currentViewingRecord) return;
+            isShowingMaskInViewer = !isShowingMaskInViewer;
+            viewerImgEl.src = isShowingMaskInViewer ? currentViewingRecord.maskImg : currentViewingRecord.rawImg;
+            togglePhotoModeBtn.textContent = isShowingMaskInViewer ? 'Показать исходник' : 'Показать маску';
+        };
+
+        closeViewerBtn.onclick = () => {
+            photoViewer.style.display = 'none';
+            currentViewingRecord = null;
+        };
+
+        // Генерация нативной рабочей книги Excel XML Spreadsheet (.xls)
+        function generateExcelXml(recordsArray) {
+            let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1" ss:Color="#FFFFFF"/>
+   <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
+   <Alignment ss:Horizontal="Center"/>
+  </Style>
+  <Style ss:ID="NumberCell">
+   <NumberFormat ss:Format="0.00"/>
+   <Alignment ss:Horizontal="Right"/>
+  </Style>
+  <Style ss:ID="StandardCell">
+   <Alignment ss:Horizontal="Left"/>
+  </Style>
+ </Styles>
+ <Worksheet ss:Name="Замеры Керна">
+  <Table>
+   <Column ss:Width="30"/>
+   <Column ss:Width="120"/>
+   <Column ss:Width="100"/>
+   <Column ss:Width="80"/>
+   <Column ss:Width="110"/>
+   <Column ss:Width="80"/>
+   <Column ss:Width="60"/>
+   <Column ss:Width="70"/>
+   <Row ss:StyleID="Header">
+    <Cell><Data ss:Type="String">№</Data></Cell>
+    <Cell><Data ss:Type="String">Шифр образца</Data></Cell>
+    <Cell><Data ss:Type="String">Площадь, см²</Data></Cell>
+    <Cell><Data ss:Type="String">База, мм</Data></Cell>
+    <Cell><Data ss:Type="String">Режим</Data></Cell>
+    <Cell><Data ss:Type="String">Дата</Data></Cell>
+    <Cell><Data ss:Type="String">Время</Data></Cell>
+    <Cell><Data ss:Type="String">Порог</Data></Cell>
+   </Row>`;
+
+            recordsArray.forEach((r, i) => {
+                xml += `
+   <Row>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="Number">${i + 1}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.name}</Data></Cell>
+    <Cell ss:StyleID="NumberCell"><Data ss:Type="Number">${r.area}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="Number">${r.baseMm}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.mode}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.date}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.time}</Data></Cell>
+    <Cell ss:StyleID="StandardCell"><Data ss:Type="String">${r.threshold}</Data></Cell>
+   </Row>`;
+            });
+
+            xml += `
+  </Table>
+ </Worksheet>
+</Workbook>`;
+            return xml;
+        }
+
+        // Выгрузка Excel за период (через системный шеринг файла — открывается сразу в Excel/диске)
+        exportExcelPeriodBtn.onclick = function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
                 return;
             }
 
-            const csvContent = generateCsvString();
-            const fileName = `Журнал_испытаний_${new Date().toISOString().slice(0, 10)}.csv`;
+            const fromStr = filterDateFrom.value || 'все';
+            const toStr = filterDateTo.value || 'все';
+            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.xls`;
+            const xmlContent = generateExcelXml(filtered);
 
             if (window.plugins && window.plugins.socialsharing && window.cordova && cordova.file) {
-                const cacheDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
-                window.resolveLocalFileSystemURL(cacheDir, function(dirEntry) {
+                const tempDir = cordova.file.cacheDirectory || cordova.file.dataDirectory;
+                window.resolveLocalFileSystemURL(tempDir, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
                                 window.plugins.socialsharing.shareWithOptions({
-                                    message: `Сводный отчёт: ${fileName}`,
+                                    message: `Сводный отчёт Excel: ${fileName}`,
                                     subject: fileName,
                                     files: [fileEntry.nativeURL]
-                                }, () => {}, (err) => alert('Ошибка отправки: ' + JSON.stringify(err)));
+                                });
                             };
-                            writer.onerror = (err) => alert('Ошибка подготовки файла: ' + JSON.stringify(err));
-                            writer.write(csvContent);
+                            writer.write(xmlContent);
                         });
-                    }, (err) => alert('Не удалось создать файл отчета: ' + JSON.stringify(err)));
-                }, (err) => alert('Ошибка доступа к кэшу: ' + JSON.stringify(err)));
+                    });
+                });
             } else {
-                alert('Функция отправки доступна в установленном приложении.');
+                // Для браузера ПК
+                const blob = new Blob([xmlContent], { type: 'application/vnd.ms-excel' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 1000);
             }
         };
 
@@ -1289,7 +1419,7 @@
             rawMask.delete(); objContours.delete(); objHierarchy.delete(); solidMask.delete();
         }
 
-        renderTable();
+        updateArchiveCounter();
 
         function startAppCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
