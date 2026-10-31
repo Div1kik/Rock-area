@@ -618,6 +618,7 @@
         let mediaStream = null;
         let videoTrack = null;
         let focusTimer = null;
+        let isCameraStarting = false;
 
         let isManualMode = false;
         let manualPoints = [];
@@ -675,42 +676,58 @@
         }
 
         async function initCamera() {
-            if (isCaptured) return;
+            if (isCaptured || isCameraStarting) return;
+            isCameraStarting = true;
             stopCamera();
+
+            video.muted = true;
+            video.defaultMuted = true;
+            video.playsInline = true;
+            video.setAttribute('autoplay', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
 
             const constraints = {
                 video: {
                     facingMode: { ideal: "environment" },
                     width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 30 }
+                    height: { ideal: 720 }
                 },
                 audio: false
             };
 
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                let stream = null;
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (e1) {
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                    } catch (e2) {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    }
+                }
+
                 mediaStream = stream;
                 video.srcObject = stream;
-                const playPromise = video.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(() => {
+                videoTrack = stream.getVideoTracks()[0];
+
+                video.onloadedmetadata = () => {
+                    video.play().catch(() => {
                         video.muted = true;
                         video.play();
                     });
-                }
-                videoTrack = stream.getVideoTracks()[0];
+                };
+                video.play().catch(() => {
+                    video.muted = true;
+                    video.play();
+                });
+
                 applyContinuousFocus();
             } catch (err) {
-                try {
-                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                    mediaStream = fallbackStream;
-                    video.srcObject = fallbackStream;
-                    video.play();
-                    videoTrack = fallbackStream.getVideoTracks()[0];
-                } catch (e) {
-                    statusText.textContent = 'Камера недоступна';
-                }
+                statusText.textContent = 'Камера недоступна';
+            } finally {
+                isCameraStarting = false;
             }
         }
 
@@ -827,8 +844,8 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            if (video.srcObject) {
-                video.play();
+            if (video.srcObject && mediaStream && mediaStream.active) {
+                video.play().catch(() => {});
             } else {
                 initCamera();
             }
@@ -1093,16 +1110,19 @@
             if (!cvReady) return;
 
             const snapCanvas = document.createElement('canvas');
-            snapCanvas.width = video.videoWidth || 1280;
-            snapCanvas.height = video.videoHeight || 720;
+            const w = video.videoWidth > 0 ? video.videoWidth : 1280;
+            const h = video.videoHeight > 0 ? video.videoHeight : 720;
+            snapCanvas.width = w;
+            snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+            
+            ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            showResultMode();
             processFrame(lastRawMat, null);
+            showResultMode();
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1119,16 +1139,19 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = img.width;
-                    tempCanvas.height = img.height;
+                    const natW = img.naturalWidth || img.width || 1000;
+                    const natH = img.naturalHeight || img.height || 1000;
+                    
+                    tempCanvas.width = natW;
+                    tempCanvas.height = natH;
                     const ctx = tempCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+                    ctx.drawImage(img, 0, 0, natW, natH);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    showResultMode();
                     processFrame(lastRawMat, null);
+                    showResultMode();
                 };
                 img.src = event.target.result;
             };
@@ -1313,7 +1336,6 @@
                                 writer.write(blob);
                             });
                         }, function(err) {
-                            // Если файл с таким именем уже существует от прошлой установки и заблокирован, сохраняем с добавлением точного времени
                             if (!isRetry) {
                                 const dotIdx = fileName.lastIndexOf('.');
                                 const base = dotIdx !== -1 ? fileName.slice(0, dotIdx) : fileName;
@@ -1345,7 +1367,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски (оригинал)
+        // Скачивание отдельного снимка маски
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1405,50 +1427,11 @@
             const toStr = filterDateTo.value || 'все';
             const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
             const csvContent = generateCsvStringForArray(filtered);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+            
+            const csvBytes = new TextEncoder().encode(csvContent);
+            const blob = new Blob([csvBytes], { type: 'text/csv;charset=utf-8' });
 
             saveBlobDirectlyToDevice(blob, fileName);
-        };
-
-        // Пакетный ZIP-архив за период
-        exportZipPeriodBtn.onclick = async function() {
-            const filtered = getFilteredRecords();
-            if (filtered.length === 0) {
-                alert('Нет замеров за выбранный период!');
-                return;
-            }
-
-            exportZipPeriodBtn.style.opacity = '0.5';
-            exportZipPeriodBtn.style.pointerEvents = 'none';
-
-            try {
-                const zip = new JSZip();
-                const folderRaw = zip.folder("1_Исходники");
-                const folderMasks = zip.folder("2_Контуры_маски");
-
-                filtered.forEach((rec, idx) => {
-                    const prefix = `${idx + 1}_${rec.name}`;
-                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-                });
-
-                const csvData = generateCsvStringForArray(filtered);
-                zip.file("Журнал_испытаний.csv", csvData);
-
-                const fromStr = filterDateFrom.value || 'все';
-                const toStr = filterDateTo.value || 'все';
-                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
-
-                const zipBlob = await zip.generateAsync({ type: "blob" });
-                saveBlobDirectlyToDevice(zipBlob, fileName);
-            } catch (err) {
-                alert('Ошибка создания ZIP: ' + err.message);
-            } finally {
-                exportZipPeriodBtn.style.opacity = '1';
-                exportZipPeriodBtn.style.pointerEvents = 'auto';
-            }
         };
 
         // Формирование HTML-фотопротокола
@@ -1517,8 +1500,53 @@
 </body>
 </html>`;
 
-            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+            const htmlBytes = new TextEncoder().encode(htmlDoc);
+            const blob = new Blob([htmlBytes], { type: 'text/html;charset=utf-8' });
+            
             saveBlobDirectlyToDevice(blob, fileName);
+        };
+
+        // Пакетный ZIP-архив за период
+        exportZipPeriodBtn.onclick = async function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
+                return;
+            }
+
+            exportZipPeriodBtn.style.opacity = '0.5';
+            exportZipPeriodBtn.style.pointerEvents = 'none';
+
+            try {
+                const zip = new JSZip();
+                const folderRaw = zip.folder("1_Исходники");
+                const folderMasks = zip.folder("2_Контуры_маски");
+
+                filtered.forEach((rec, idx) => {
+                    const prefix = `${idx + 1}_${rec.name}`;
+                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
+                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
+                });
+
+                const csvData = generateCsvStringForArray(filtered);
+                zip.file("Журнал_испытаний.csv", csvData);
+
+                const fromStr = filterDateFrom.value || 'все';
+                const toStr = filterDateTo.value || 'все';
+                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
+
+                const zipArray = await zip.generateAsync({ type: "uint8array" });
+                const blob = new Blob([zipArray], { type: 'application/zip' });
+                
+                saveBlobDirectlyToDevice(blob, fileName);
+            } catch (err) {
+                alert('Ошибка создания ZIP: ' + err.message);
+            } finally {
+                exportZipPeriodBtn.style.opacity = '1';
+                exportZipPeriodBtn.style.pointerEvents = 'auto';
+            }
         };
 
         // =============================================================
@@ -1717,22 +1745,32 @@
 
         updateArchiveCounter();
 
-        function bootApplication() {
-            initCamera();
+        function requestAndStartCamera() {
             if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
                 const permissions = cordova.plugins.permissions;
-                permissions.requestPermission(permissions.CAMERA, function() {}, function() {});
+                permissions.checkPermission(permissions.CAMERA, function(status) {
+                    if (status.hasPermission) {
+                        initCamera();
+                    } else {
+                        permissions.requestPermission(permissions.CAMERA, function() {
+                            initCamera();
+                        }, function() {
+                            initCamera();
+                        });
+                    }
+                }, function() {
+                    initCamera();
+                });
+            } else {
+                initCamera();
             }
         }
 
         if (window.cordova) {
-            document.addEventListener('deviceready', bootApplication, false);
+            document.addEventListener('deviceready', requestAndStartCamera, false);
         } else {
-            document.addEventListener('DOMContentLoaded', bootApplication);
+            document.addEventListener('DOMContentLoaded', requestAndStartCamera);
         }
-        setTimeout(() => {
-            if (!mediaStream && !isCaptured) initCamera();
-        }, 300);
     </script>
 </body>
 </html>
