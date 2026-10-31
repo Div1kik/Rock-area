@@ -1115,14 +1115,13 @@
             snapCanvas.width = w;
             snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
-            
             ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            processFrame(lastRawMat, null);
             showResultMode();
+            processFrame(lastRawMat, null);
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1139,19 +1138,16 @@
                 const img = new Image();
                 img.onload = () => {
                     const tempCanvas = document.createElement('canvas');
-                    const natW = img.naturalWidth || img.width || 1000;
-                    const natH = img.naturalHeight || img.height || 1000;
-                    
-                    tempCanvas.width = natW;
-                    tempCanvas.height = natH;
+                    tempCanvas.width = img.width;
+                    tempCanvas.height = img.height;
                     const ctx = tempCanvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, natW, natH);
+                    ctx.drawImage(img, 0, 0);
 
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    processFrame(lastRawMat, null);
                     showResultMode();
+                    processFrame(lastRawMat, null);
                 };
                 img.src = event.target.result;
             };
@@ -1313,7 +1309,7 @@
             }
         };
 
-        // ПРЯМОЕ СОХРАНЕНИЕ СТРОГО В ПАПКУ DOCUMENTS БЕЗ ПАПКИ DATA
+        // ТА САМАЯ ОРИГИНАЛЬНАЯ РАБОЧАЯ ФУНКЦИЯ СОХРАНЕНИЯ ЧЕРЕЗ BLOB В DOCUMENTS
         function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalRootDirectory 
@@ -1327,11 +1323,11 @@
                                 writer.onwriteend = function() {
                                     fileEntry.file(function(realFile) {
                                         const sizeKb = (realFile.size / 1024).toFixed(1);
-                                        alert(`✓ Файл сохранён на телефон!\n\nИмя: ${nameToUse}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
+                                        alert(`✓ Файл сохранён!\n\nИмя: ${nameToUse}\nРазмер: ${sizeKb} КБ\n\nПуть: Documents/`);
                                     });
                                 };
                                 writer.onerror = function(err) {
-                                    alert('Ошибка записи в файл: ' + JSON.stringify(err));
+                                    alert('Ошибка записи: ' + JSON.stringify(err));
                                 };
                                 writer.write(blob);
                             });
@@ -1367,7 +1363,7 @@
             }, 1000);
         }
 
-        // Скачивание отдельного снимка маски
+        // Скачивание отдельного снимка маски (оригинал)
         window.saveSingleSamplePhoto = function(id) {
             const rec = records.find(r => r.id === id);
             if (!rec || !rec.maskImg) return;
@@ -1432,6 +1428,49 @@
             const blob = new Blob([csvBytes], { type: 'text/csv;charset=utf-8' });
 
             saveBlobDirectlyToDevice(blob, fileName);
+        };
+
+        // Пакетный ZIP-архив за период
+        exportZipPeriodBtn.onclick = async function() {
+            const filtered = getFilteredRecords();
+            if (filtered.length === 0) {
+                alert('Нет замеров за выбранный период!');
+                return;
+            }
+
+            exportZipPeriodBtn.style.opacity = '0.5';
+            exportZipPeriodBtn.style.pointerEvents = 'none';
+
+            try {
+                const zip = new JSZip();
+                const folderRaw = zip.folder("1_Исходники");
+                const folderMasks = zip.folder("2_Контуры_маски");
+
+                filtered.forEach((rec, idx) => {
+                    const prefix = `${idx + 1}_${rec.name}`;
+                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
+                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
+                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
+                });
+
+                const csvData = generateCsvStringForArray(filtered);
+                zip.file("Журнал_испытаний.csv", csvData);
+
+                const fromStr = filterDateFrom.value || 'все';
+                const toStr = filterDateTo.value || 'все';
+                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
+
+                const zipArray = await zip.generateAsync({ type: "uint8array" });
+                const blob = new Blob([zipArray], { type: 'application/zip' });
+                
+                saveBlobDirectlyToDevice(blob, fileName);
+            } catch (err) {
+                alert('Ошибка создания ZIP: ' + err.message);
+            } finally {
+                exportZipPeriodBtn.style.opacity = '1';
+                exportZipPeriodBtn.style.pointerEvents = 'auto';
+            }
         };
 
         // Формирование HTML-фотопротокола
@@ -1504,49 +1543,6 @@
             const blob = new Blob([htmlBytes], { type: 'text/html;charset=utf-8' });
             
             saveBlobDirectlyToDevice(blob, fileName);
-        };
-
-        // Пакетный ZIP-архив за период
-        exportZipPeriodBtn.onclick = async function() {
-            const filtered = getFilteredRecords();
-            if (filtered.length === 0) {
-                alert('Нет замеров за выбранный период!');
-                return;
-            }
-
-            exportZipPeriodBtn.style.opacity = '0.5';
-            exportZipPeriodBtn.style.pointerEvents = 'none';
-
-            try {
-                const zip = new JSZip();
-                const folderRaw = zip.folder("1_Исходники");
-                const folderMasks = zip.folder("2_Контуры_маски");
-
-                filtered.forEach((rec, idx) => {
-                    const prefix = `${idx + 1}_${rec.name}`;
-                    const rawBase64 = (rec.rawImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    const maskBase64 = (rec.maskImg || '').replace(/^data:image\/[a-z]+;base64,/, "");
-                    if (rawBase64) folderRaw.file(`${prefix}_исходник.jpg`, rawBase64, { base64: true });
-                    if (maskBase64) folderMasks.file(`${prefix}_маска_${rec.area}см2.jpg`, maskBase64, { base64: true });
-                });
-
-                const csvData = generateCsvStringForArray(filtered);
-                zip.file("Журнал_испытаний.csv", csvData);
-
-                const fromStr = filterDateFrom.value || 'все';
-                const toStr = filterDateTo.value || 'все';
-                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
-
-                const zipArray = await zip.generateAsync({ type: "uint8array" });
-                const blob = new Blob([zipArray], { type: 'application/zip' });
-                
-                saveBlobDirectlyToDevice(blob, fileName);
-            } catch (err) {
-                alert('Ошибка создания ZIP: ' + err.message);
-            } finally {
-                exportZipPeriodBtn.style.opacity = '1';
-                exportZipPeriodBtn.style.pointerEvents = 'auto';
-            }
         };
 
         // =============================================================
