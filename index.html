@@ -844,11 +844,7 @@
             infoDisplay.textContent = 'Нажмите на область для ручной фокусировки';
             threshVal.textContent = 'Авто';
             fileInput.value = '';
-            if (video.srcObject && mediaStream && mediaStream.active) {
-                video.play().catch(() => {});
-            } else {
-                initCamera();
-            }
+            initCamera();
         }
 
         // =============================================================
@@ -1115,14 +1111,13 @@
             snapCanvas.width = w;
             snapCanvas.height = h;
             const ctx = snapCanvas.getContext('2d');
-            
             ctx.drawImage(video, 0, 0, w, h);
 
             if (lastRawMat) lastRawMat.delete();
             lastRawMat = cv.imread(snapCanvas);
 
-            processFrame(lastRawMat, null);
             showResultMode();
+            processFrame(lastRawMat, null);
         });
 
         galleryBtn.addEventListener('click', () => {
@@ -1150,8 +1145,8 @@
                     if (lastRawMat) lastRawMat.delete();
                     lastRawMat = cv.imread(tempCanvas);
 
-                    processFrame(lastRawMat, null);
                     showResultMode();
+                    processFrame(lastRawMat, null);
                 };
                 img.src = event.target.result;
             };
@@ -1313,32 +1308,34 @@
             }
         };
 
-        // ТОТ САМЫЙ РАБОЧИЙ БЛОК СОХРАНЕНИЯ СТРОГО В DOCUMENTS
-        function saveDataDirectlyToDevice(data, fileName) {
+        // ПРЯМАЯ ЗАПИСЬ СТРОГО В ПАПКУ DOCUMENTS
+        function saveBlobDirectlyToDevice(blob, fileName) {
             if (window.cordova && cordova.file) {
                 const targetDirUri = cordova.file.externalRootDirectory + 'Documents/';
-                
+
                 window.resolveLocalFileSystemURL(targetDirUri, function(dirEntry) {
                     dirEntry.getFile(fileName, { create: true, exclusive: false }, function(fileEntry) {
                         fileEntry.createWriter(function(writer) {
                             writer.onwriteend = function() {
-                                alert(`✓ Файл успешно сохранён!\n\nИмя: ${fileName}\n\nОн находится в системной папке: Documents (Документы)`);
+                                fileEntry.file(function(realFile) {
+                                    const sizeKb = (realFile.size / 1024).toFixed(1);
+                                    alert(`✓ Файл сохранён!\n\nИмя: ${fileName}\nРазмер: ${sizeKb} КБ\n\nПапка: Documents (Документы)`);
+                                });
                             };
-                            writer.onerror = function(e) {
-                                alert('Ошибка записи файла в Documents: ' + e.toString());
+                            writer.onerror = function(err) {
+                                alert('Ошибка записи в файл: ' + (err && err.code ? 'Код ' + err.code : JSON.stringify(err)));
                             };
-                            writer.write(data);
+                            writer.write(blob);
                         });
                     }, function(err) {
-                        alert('Ошибка создания файла в папке Documents. Код: ' + err.code);
+                        alert('Ошибка создания файла в Documents: ' + (err && err.code ? 'Код ' + err.code : JSON.stringify(err)));
                     });
                 }, function(err) {
-                    alert('Не удалось получить доступ к папке Documents. Код: ' + err.code);
+                    alert('Ошибка доступа к папке Documents: ' + (err && err.code ? 'Код ' + err.code : JSON.stringify(err)));
                 });
                 return;
             }
 
-            let blob = data instanceof Blob ? data : new Blob([data]);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1363,10 +1360,13 @@
                 byteNumbers[i] = byteCharacters.charCodeAt(i);
             }
             const byteArray = new Uint8Array(byteNumbers);
-            const fileName = `${rec.name}_S-${rec.area}cm2.jpg`;
+            const blob = new Blob([byteArray], { type: 'image/jpeg' });
+            
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+            const fileName = `${rec.name}_S-${rec.area}cm2_${timeStr}.jpg`;
 
-            const blob = new Blob([byteArray.buffer], { type: 'image/jpeg' });
-            saveDataDirectlyToDevice(blob, fileName);
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
         window.openPhotoViewer = function(id) {
@@ -1399,7 +1399,7 @@
             return csv;
         }
 
-        // Скачивание CSV таблицы
+        // 1. Скачивание CSV таблицы за период
         exportExcelPeriodBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1409,16 +1409,17 @@
 
             const fromStr = filterDateFrom.value || 'все';
             const toStr = filterDateTo.value || 'все';
-            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}.csv`;
-            const csvContent = generateCsvStringForArray(filtered);
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+            const fileName = `Отчёт_керн_${fromStr}_по_${toStr}_${timeStr}.csv`;
             
-            const csvBytes = new TextEncoder().encode(csvContent);
-            const blob = new Blob([csvBytes.buffer], { type: 'text/csv;charset=utf-8' });
+            const csvContent = generateCsvStringForArray(filtered);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
 
-            saveDataDirectlyToDevice(blob, fileName);
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
-        // Пакетный ZIP-архив
+        // 2. Пакетный ZIP-архив за период
         exportZipPeriodBtn.onclick = async function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1447,12 +1448,12 @@
 
                 const fromStr = filterDateFrom.value || 'все';
                 const toStr = filterDateTo.value || 'все';
-                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}.zip`;
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+                const fileName = `Фотоархив_керна_${fromStr}_по_${toStr}_${timeStr}.zip`;
 
-                const zipArray = await zip.generateAsync({ type: "arraybuffer" });
-                const blob = new Blob([zipArray], { type: 'application/zip' });
-                
-                saveDataDirectlyToDevice(blob, fileName);
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                saveBlobDirectlyToDevice(zipBlob, fileName);
             } catch (err) {
                 alert('Ошибка создания ZIP: ' + err.message);
             } finally {
@@ -1461,7 +1462,7 @@
             }
         };
 
-        // Формирование HTML-фотопротокола
+        // 3. Формирование HTML-фотопротокола
         exportHtmlReportBtn.onclick = function() {
             const filtered = getFilteredRecords();
             if (filtered.length === 0) {
@@ -1471,7 +1472,9 @@
 
             const fromStr = filterDateFrom.value || 'все';
             const toStr = filterDateTo.value || 'все';
-            const fileName = `Протокол_испытаний_${fromStr}_по_${toStr}.html`;
+            const now = new Date();
+            const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+            const fileName = `Протокол_испытаний_${fromStr}_по_${toStr}_${timeStr}.html`;
 
             let htmlDoc = `<!DOCTYPE html>
 <html lang="ru">
@@ -1527,10 +1530,8 @@
 </body>
 </html>`;
 
-            const htmlBytes = new TextEncoder().encode(htmlDoc);
-            const blob = new Blob([htmlBytes.buffer], { type: 'text/html;charset=utf-8' });
-            
-            saveDataDirectlyToDevice(blob, fileName);
+            const blob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
+            saveBlobDirectlyToDevice(blob, fileName);
         };
 
         // =============================================================
@@ -1619,7 +1620,7 @@
             let gray = new cv.Mat(), blur = new cv.Mat(), edged = new cv.Mat();
             cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
-            cv.Canny(blur, edged, 40, 140);
+            cv.Canny(blur, edged, 50, 150);
 
             let quad = null;
             const mode = targetMode.value;
@@ -1676,7 +1677,7 @@
             cv.imshow(lastRawCroppedCanvas, cropped);
 
             let cropGray = new cv.Mat(), cropBlur = new cv.Mat();
-            cv.cvtColor(cropped, cropGray, cropBlur, cv.COLOR_RGBA2GRAY);
+            cv.cvtColor(cropped, cropGray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(cropGray, cropBlur, new cv.Size(5, 5), 0);
 
             let rawMask = new cv.Mat();
